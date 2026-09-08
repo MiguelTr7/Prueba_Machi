@@ -12,6 +12,7 @@ cd Modelo_ML_waymo
 
 ### 2. Crear y activar el entorno virtual
 python -m venv .venv
+
 source .venv/Scripts/activate
 
 *(Nota: Al activarse correctamente verás (.venv) al inicio de tu línea de comandos).*
