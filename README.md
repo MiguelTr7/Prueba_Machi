@@ -7,7 +7,7 @@
 Sigue estos pasos desde la terminal de **Git Bash** para levantar y ejecutar el proyecto en cualquier computadora desde cero:
 
 ### 1. Clonar el repositorio y entrar al proyecto
-git clone <https://github.com/donMixho/Modelo_ML_waymo.git>
+git clone <https://github.com/donMixho/OperacionesAeronaves.git>
 cd Modelo_ML_waymo
 
 ### 2. Crear y activar el entorno virtual
@@ -33,15 +33,7 @@ kedro run --pipeline=image_ingestion
 
 ## Overview
 
-Proyecto Kedro (`kedro 1.3.1`) para el análisis exploratorio y la verificación de señal
-predictiva sobre un dataset sintético de detecciones estilo Waymo:
-[data/01_raw/detecciones_waymo_like.csv](data/01_raw/detecciones_waymo_like.csv).
-
-**Importante:** este CSV no es el Waymo Open Dataset real. Es una tabla plana de
-detecciones (153 segmentos, ~40,680 filas) con cajas delimitadoras 3D, sin imágenes,
-cámaras ni tfrecords. Todo el trabajo hecho hasta ahora es de **diagnóstico**: inventario,
-perfilado, auditoría de calidad y verificación de señal. No se ha limpiado, imputado ni
-transformado ningún dato de forma persistente.
+Url del dataset: <https://datos.gob.cl/dataset/operaciones-aeronaves>
 
 ## Pipelines
 
