@@ -4,30 +4,32 @@
 
 | ruta_relativa | formato | tamano_mb | segmento_contexto |
 | --- | --- | --- | --- |
-| detecciones_waymo_like.csv | csv | 4.6373 | None |
+| bitacora-vuelos.parquet | parquet | 130.8714 | None |
+| operaciones-aeropuertos.csv | csv | 0.2699 | None |
 
 ## Archivos
 
-- **total_archivos**: 1
-- **tamano_total_mb**: 4.6373
+- **total_archivos**: 2
+- **tamano_total_mb**: 131.1413
 
 ## Archivos por formato
 
+- **parquet**: 1
 - **csv**: 1
 
 ## Muestra
 
 - **archivos_inspeccionados**: 1
-- **archivo**: detecciones_waymo_like.csv
+- **archivo**: operaciones-aeropuertos.csv
 - **filas_leidas**: 20
 
 ## Esquema
 
-- **columnas**: segment_id, timestamp_micros, id_interno, object_type, box_center_x, box_center_y, box_center_z, box_length, box_width, box_height, speed_mps, num_lidar_points, weather, time_of_day, detection_difficulty, sensor_version
+- **columnas**: mes_id, aeropuerto_oaci, internacional_domestico, cnt_operaciones
 
 ## Anotaciones
 
-- **bounding_box_3d**: si
+- **bounding_box_3d**: no
 - **bounding_box_2d**: no
 
 ## Camaras
@@ -36,20 +38,12 @@
 
 ## Metadata
 
-- **time_of_day**: Day, Night, Dawn/Dusk
-- **weather**: sunny, soleado, SUNNY, Sunny, RAIN , fog, rain
+- **time_of_day**: campo no presente
+- **weather**: campo no presente
 - **location**: campo no presente
-- **detection_difficulty**: LEVEL_1, LEVEL_2
-- **sensor_version**: v2.0.1
+- **detection_difficulty**: campo no presente
+- **sensor_version**: campo no presente
 
 ## Conteo objetos
 
-- **VEHICLE**: 13
-- **PEDESTRIAN**: 4
-- **SIGN**: 1
-- **Ped**: 1
-- **Pedestrian**: 1
-
-## Segmentos
-
-- **segmentos_distintos_en_muestra**: 20
+- **advertencia**: columna de clase no encontrada

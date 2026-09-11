@@ -4,7 +4,8 @@
 # Link: https://docs.kedro.org/en/stable/catalog-data/introduction/#data-catalog
 
 # --- data_inventory pipeline -------------------------------------------------
-# Read-only inventory/profiling of data/01_raw. See src/modelo_ml_waymo/pipelines/data_inventory.
+# Read-only inventory/profiling of data/01_raw.
+# See src/modelo_ml_waymo/pipelines/data_inventory.
 
 data_inventory_raw_files_index:
   type: pandas.ParquetDataset
@@ -25,132 +26,67 @@ data_inventory_report_md:
     open_args_save: { mode: w, encoding: utf-8 }
     open_args_load: { mode: r, encoding: utf-8 }
 
-# --- eda pipeline -------------------------------------------------------------
-# Read-only exploratory data analysis of data/01_raw. See src/modelo_ml_waymo/pipelines/eda.
+# --- data_processing pipeline -------------------------------------------------
+# Ingesta, limpieza, integracion y EDA basico de datos aeronauticos JAC.
+# See src/modelo_ml_waymo/pipelines/data_processing.
 
-raw_detections:
+vuelos_raw:
+  type: pandas.ParquetDataset
+  filepath: data/01_raw/bitacora-vuelos.parquet
+
+aeropuertos_raw:
   type: pandas.CSVDataset
-  filepath: data/01_raw/detecciones_waymo_like.csv
+  filepath: data/01_raw/operaciones-aeropuertos.csv
 
-eda_column_profile:
+# 02_intermediate: datos en transformacion
+vuelos_preprocessed:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_column_profile.parquet
+  filepath: data/02_intermediate/vuelos_preprocessed.parquet
 
-eda_categorical_audit:
+eda_figura_manifest:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_categorical_audit.parquet
+  filepath: data/02_intermediate/eda_figura_manifest.parquet
 
-eda_quality_flags_summary:
+# 03_primary: dato integrado y limpio, listo para modelar
+vuelos_con_operaciones:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_quality_flags_summary.parquet
+  filepath: data/03_primary/vuelos_con_operaciones.parquet
 
-eda_null_cooccurrence_matrix:
+# --- ml pipeline --------------------------------------------------------------
+# EDA avanzado, clustering no supervisado y clasificacion supervisada.
+# See src/modelo_ml_waymo/pipelines/ml.
+
+aeropuertos_perfil:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_null_cooccurrence_matrix.parquet
+  filepath: data/02_intermediate/aeropuertos_perfil.parquet
 
-eda_temporal_consistency_by_segment:
+eda_avanzado_manifest:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_temporal_consistency_by_segment.parquet
+  filepath: data/02_intermediate/eda_avanzado_manifest.parquet
 
-eda_target_class_distribution:
+cluster_labels:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_target_class_distribution.parquet
+  filepath: data/02_intermediate/cluster_labels.parquet
 
-eda_target_imbalance_ratio:
+cluster_metricas:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_target_imbalance_ratio.parquet
+  filepath: data/02_intermediate/cluster_metricas.parquet
 
-eda_target_crosstab_long:
+metricas_supervisado:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_target_crosstab_long.parquet
+  filepath: data/02_intermediate/metricas_supervisado.parquet
 
-eda_target_crosstab_association:
+metricas_cv_supervisado:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_target_crosstab_association.parquet
+  filepath: data/02_intermediate/metricas_cv_supervisado.parquet
 
-eda_target_numeric_stats_by_class:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/eda_target_numeric_stats_by_class.parquet
+# 06_models: objetos de modelo serializados con joblib
+modelo_kmeans:
+  type: pickle.PickleDataset
+  filepath: data/06_models/kmeans.pkl
+  backend: joblib
 
-eda_figure_manifest:
-  type: json.JSONDataset
-  filepath: data/02_intermediate/eda_figure_manifest.json
-
-eda_figures:
-  type: matplotlib.MatplotlibDataset
-  filepath: data/08_reporting/figures
-  overwrite: true
-
-eda_report_md:
-  type: text.TextDataset
-  filepath: data/08_reporting/eda_report.md
-  fs_args:
-    open_args_save: { mode: w, encoding: utf-8 }
-    open_args_load: { mode: r, encoding: utf-8 }
-
-signal_mi_scores:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/signal_mi_scores.parquet
-
-signal_separability:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/signal_separability.parquet
-
-signal_baseline_metrics:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/signal_baseline_metrics.parquet
-
-signal_summary:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/signal_summary.parquet
-
-signal_check_report_md:
-  type: text.TextDataset
-  filepath: data/08_reporting/signal_check_report.md
-  fs_args:
-    open_args_save: { mode: w, encoding: utf-8 }
-    open_args_load: { mode: r, encoding: utf-8 }
-
-# --- image_ingestion pipeline --------------------------------------------------
-# Extraccion de imagenes de camara (PNG en escala de grises) desde tfrecords
-# locales del Waymo Open Dataset PERCEPTION. No descarga nada por si sola.
-# NOTA: este pipeline queda en modo legacy. El dataset real (v2.0.1) usa
-# formato Parquet, no tfrecords. Usar el pipeline waymo_v2 para datos reales.
-# See src/modelo_ml_waymo/pipelines/image_ingestion.
-
-image_ingestion_tfrecord_index:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/image_ingestion_tfrecord_index.parquet
-
-image_ingestion_records:
-  type: json.JSONDataset
-  filepath: data/02_intermediate/image_ingestion_records.json
-
-image_metadata:
-  type: pandas.ParquetDataset
-  filepath: data/02_raw/image_metadata.parquet
-
-# --- waymo_v2 pipeline --------------------------------------------------------
-# Procesamiento del Waymo Open Dataset v2.0.1 (formato Parquet).
-# Coloca los archivos .parquet descargados desde Colab en las subcarpetas de
-# data/01_raw/waymo_v2/ antes de ejecutar kedro run --pipeline=waymo_v2.
-# See src/modelo_ml_waymo/pipelines/waymo_v2.
-
-waymo_v2_features_raw:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/waymo_v2_features_raw.parquet
-
-waymo_v2_image_metadata:
-  type: pandas.ParquetDataset
-  filepath: data/02_raw/waymo_v2_image_metadata.parquet
-
-waymo_v2_features:
-  type: pandas.ParquetDataset
-  filepath: data/02_intermediate/waymo_v2_features.parquet
-
-waymo_v2_report_md:
-  type: text.TextDataset
-  filepath: data/08_reporting/waymo_v2_report.md
-  fs_args:
-    open_args_save: { mode: w, encoding: utf-8 }
-    open_args_load: { mode: r, encoding: utf-8 }
+modelo_rf:
+  type: pickle.PickleDataset
+  filepath: data/06_models/random_forest.pkl
+  backend: joblib

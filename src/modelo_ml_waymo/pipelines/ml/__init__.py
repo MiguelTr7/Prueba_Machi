@@ -1,7 +1,4 @@
-"""
-This is a boilerplate pipeline 'eda'
-generated using Kedro 1.3.1
-"""
+"""Pipeline 'ml' — EDA avanzado, clustering y clasificación supervisada."""
 
 from .pipeline import create_pipeline
 
