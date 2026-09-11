@@ -110,3 +110,47 @@ signal_check_report_md:
   fs_args:
     open_args_save: { mode: w, encoding: utf-8 }
     open_args_load: { mode: r, encoding: utf-8 }
+
+# --- image_ingestion pipeline --------------------------------------------------
+# Extraccion de imagenes de camara (PNG en escala de grises) desde tfrecords
+# locales del Waymo Open Dataset PERCEPTION. No descarga nada por si sola.
+# NOTA: este pipeline queda en modo legacy. El dataset real (v2.0.1) usa
+# formato Parquet, no tfrecords. Usar el pipeline waymo_v2 para datos reales.
+# See src/modelo_ml_waymo/pipelines/image_ingestion.
+
+image_ingestion_tfrecord_index:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/image_ingestion_tfrecord_index.parquet
+
+image_ingestion_records:
+  type: json.JSONDataset
+  filepath: data/02_intermediate/image_ingestion_records.json
+
+image_metadata:
+  type: pandas.ParquetDataset
+  filepath: data/02_raw/image_metadata.parquet
+
+# --- waymo_v2 pipeline --------------------------------------------------------
+# Procesamiento del Waymo Open Dataset v2.0.1 (formato Parquet).
+# Coloca los archivos .parquet descargados desde Colab en las subcarpetas de
+# data/01_raw/waymo_v2/ antes de ejecutar kedro run --pipeline=waymo_v2.
+# See src/modelo_ml_waymo/pipelines/waymo_v2.
+
+waymo_v2_features_raw:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/waymo_v2_features_raw.parquet
+
+waymo_v2_image_metadata:
+  type: pandas.ParquetDataset
+  filepath: data/02_raw/waymo_v2_image_metadata.parquet
+
+waymo_v2_features:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/waymo_v2_features.parquet
+
+waymo_v2_report_md:
+  type: text.TextDataset
+  filepath: data/08_reporting/waymo_v2_report.md
+  fs_args:
+    open_args_save: { mode: w, encoding: utf-8 }
+    open_args_load: { mode: r, encoding: utf-8 }

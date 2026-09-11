@@ -18,6 +18,10 @@ dependencies = [
     "seaborn>=0.13",
     "scikit-learn>=1.4",
     "scipy>=1.11",
+    "opencv-python-headless",
+    "tensorflow",
+    "grpcio-tools",
+    "protobuf",
 ]
 
 [project.scripts]
