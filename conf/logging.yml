@@ -36,7 +36,7 @@ loggers:
   kedro:
     level: INFO
 
-  modelo_ml_waymo:
+  operaciones_aeronaves:
     level: INFO
 
 root:

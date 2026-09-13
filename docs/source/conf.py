@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 
-# modelo_ml_waymo documentation build
+# operaciones_aeronaves documentation build
 # configuration file, created by sphinx-quickstart.
 #
 # This file is execfile()d with the current directory set to its
@@ -19,11 +19,11 @@
 #
 import re
 
-from modelo_ml_waymo import __version__ as release
+from operaciones_aeronaves import __version__ as release
 
 # -- Project information -----------------------------------------------------
 
-project = "modelo_ml_waymo"
+project = "operaciones_aeronaves"
 author = "Kedro"
 
 # The short X.Y version.
@@ -117,7 +117,7 @@ html_show_sourcelink = False
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = "modelo_ml_waymodoc"
+htmlhelp_basename = "operaciones_aeronavesdoc"
 
 # -- Options for LaTeX output ------------------------------------------------
 
@@ -145,8 +145,8 @@ latex_elements = {
 latex_documents = [
     (
         master_doc,
-        "modelo_ml_waymo.tex",
-        "modelo_ml_waymo Documentation",
+        "operaciones_aeronaves.tex",
+        "operaciones_aeronaves Documentation",
         "Kedro",
         "manual",
     )
@@ -159,8 +159,8 @@ latex_documents = [
 man_pages = [
     (
         master_doc,
-        "modelo_ml_waymo",
-        "modelo_ml_waymo Documentation",
+        "operaciones_aeronaves",
+        "operaciones_aeronaves Documentation",
         [author],
         1,
     )
@@ -174,11 +174,11 @@ man_pages = [
 texinfo_documents = [
     (
         master_doc,
-        "modelo_ml_waymo",
-        "modelo_ml_waymo Documentation",
+        "operaciones_aeronaves",
+        "operaciones_aeronaves Documentation",
         author,
-        "modelo_ml_waymo",
-        "Project modelo_ml_waymo codebase.",
+        "operaciones_aeronaves",
+        "Project operaciones_aeronaves codebase.",
         "Data-Science",
     )
 ]

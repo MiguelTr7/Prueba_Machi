@@ -2,48 +2,40 @@
 
 ## Archivos
 
-| ruta_relativa | formato | tamano_mb | segmento_contexto |
-| --- | --- | --- | --- |
-| bitacora-vuelos.parquet | parquet | 130.8714 | None |
-| operaciones-aeropuertos.csv | csv | 0.2699 | None |
+| ruta_relativa | formato | tamano_mb |
+| --- | --- | --- |
+| bitacora-vuelos.parquet | parquet | 130.8714 |
+| clima_diario_scte.csv | csv | 0.1036 |
+| operaciones-aeropuertos.csv | csv | 0.2699 |
 
 ## Archivos
 
-- **total_archivos**: 2
-- **tamano_total_mb**: 131.1413
+- **total_archivos**: 3
+- **tamano_total_mb**: 131.2449
 
 ## Archivos por formato
 
+- **csv**: 2
 - **parquet**: 1
-- **csv**: 1
 
 ## Muestra
 
-- **archivos_inspeccionados**: 1
-- **archivo**: operaciones-aeropuertos.csv
+- **archivos_inspeccionados**: 2
+
+## Archivo: clima_diario_scte.csv
+
 - **filas_leidas**: 20
+- **columnas**: fecha, tavg, tmin, tmax, prcp, snow, wdir, wspd, wpgt, pres, tsun
+- **snow (% nulos)**: 100.0
+- **wpgt (% nulos)**: 100.0
+- **tsun (% nulos)**: 100.0
+- **rango de fecha**: 2020-01-01 a 2020-01-20
 
-## Esquema
+## Archivo: operaciones-aeropuertos.csv
 
+- **filas_leidas**: 20
 - **columnas**: mes_id, aeropuerto_oaci, internacional_domestico, cnt_operaciones
-
-## Anotaciones
-
-- **bounding_box_3d**: no
-- **bounding_box_2d**: no
-
-## Camaras
-
-- **campos_camara_presentes**: no presentes en este dataset
-
-## Metadata
-
-- **time_of_day**: campo no presente
-- **weather**: campo no presente
-- **location**: campo no presente
-- **detection_difficulty**: campo no presente
-- **sensor_version**: campo no presente
-
-## Conteo objetos
-
-- **advertencia**: columna de clase no encontrada
+- **columnas con nulos**: ninguna
+- **rango de mes_id (YYYYMM)**: 200001 a 200001
+- **aeropuerto_oaci (valores distintos)**: 14
+- **internacional_domestico (valores distintos)**: 2

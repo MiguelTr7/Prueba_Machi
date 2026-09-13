@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 requires-python = ">=3.10"
-name = "modelo_ml_waymo"
+name = "operaciones_aeronaves"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
@@ -18,14 +18,10 @@ dependencies = [
     "seaborn>=0.13",
     "scikit-learn>=1.4",
     "scipy>=1.11",
-    "opencv-python-headless",
-    "tensorflow",
-    "grpcio-tools",
-    "protobuf",
 ]
 
 [project.scripts]
-"modelo-ml-waymo" = "modelo_ml_waymo.__main__:main"
+"operaciones-aeronaves" = "operaciones_aeronaves.__main__:main"
 
 [project.entry-points."kedro.hooks"]
 
@@ -49,24 +45,26 @@ dev = [
 ]
 
 [tool.setuptools.dynamic]
-version = {attr = "modelo_ml_waymo.__version__"}
+version = {attr = "operaciones_aeronaves.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
 
 [tool.kedro]
-package_name = "modelo_ml_waymo"
-project_name = "Modelo_ML_waymo"
+package_name = "operaciones_aeronaves"
+project_name = "Operaciones_Aeronaves"
 kedro_init_version = "1.3.1"
 tools = "['Linting', 'Testing', 'Custom Logging', 'Documentation', 'Data Structure']"
 example_pipeline = "False"
 source_dir = "src"
 
 [tool.pytest.ini_options]
+# El paquete vive en src/ y no se instala para correr los tests unitarios.
+pythonpath = ["src"]
 addopts = """
 --cov-report term-missing \
---cov src/modelo_ml_waymo -ra"""
+--cov src/operaciones_aeronaves -ra"""
 
 [tool.coverage.report]
 fail_under = 0

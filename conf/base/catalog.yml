@@ -5,7 +5,7 @@
 
 # --- data_inventory pipeline -------------------------------------------------
 # Read-only inventory/profiling of data/01_raw.
-# See src/modelo_ml_waymo/pipelines/data_inventory.
+# See src/operaciones_aeronaves/pipelines/data_inventory.
 
 data_inventory_raw_files_index:
   type: pandas.ParquetDataset
@@ -28,7 +28,7 @@ data_inventory_report_md:
 
 # --- data_processing pipeline -------------------------------------------------
 # Ingesta, limpieza, integracion y EDA basico de datos aeronauticos JAC.
-# See src/modelo_ml_waymo/pipelines/data_processing.
+# See src/operaciones_aeronaves/pipelines/data_processing.
 
 vuelos_raw:
   type: pandas.ParquetDataset
@@ -54,7 +54,7 @@ vuelos_con_operaciones:
 
 # --- ml pipeline --------------------------------------------------------------
 # EDA avanzado, clustering no supervisado y clasificacion supervisada.
-# See src/modelo_ml_waymo/pipelines/ml.
+# See src/operaciones_aeronaves/pipelines/ml.
 
 aeropuertos_perfil:
   type: pandas.ParquetDataset
@@ -89,4 +89,49 @@ modelo_kmeans:
 modelo_rf:
   type: pickle.PickleDataset
   filepath: data/06_models/random_forest.pkl
+  backend: joblib
+
+# --- retrasos_ml pipeline -----------------------------------------------------
+# PoC de riesgo de retraso en SCTE (El Tepual, Puerto Montt), 2020-2026.
+# Cruza la bitacora con el clima diario para estimar cuanto pesa el clima.
+# See src/operaciones_aeronaves/pipelines/retrasos_ml.
+
+# 01_raw: clima diario de Meteostat, estacion 85799 (Puerto Montt).
+# Se regenera con: python scripts/descargar_clima_scte.py
+clima_diario_raw:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/clima_diario_scte.csv
+  load_args:
+    parse_dates: ["fecha"]
+
+# 02_intermediate: recorte de la PoC y sus insumos
+vuelos_scte:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/vuelos_scte.parquet
+
+vuelos_scte_target:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/vuelos_scte_target.parquet
+
+clima_scte_features:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/clima_scte_features.parquet
+
+metricas_retrasos:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/metricas_retrasos.parquet
+
+efecto_clima_retraso:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/efecto_clima_retraso.parquet
+
+# 03_primary: vuelos + clima, listo para modelar
+vuelos_clima:
+  type: pandas.ParquetDataset
+  filepath: data/03_primary/vuelos_clima.parquet
+
+# 06_models: modelo + metadatos (features, importancia, predicciones de test)
+modelo_retrasos:
+  type: pickle.PickleDataset
+  filepath: data/06_models/modelo_retrasos.pkl
   backend: joblib

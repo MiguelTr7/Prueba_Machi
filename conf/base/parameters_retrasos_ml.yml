@@ -1,0 +1,47 @@
+# Parametros del pipeline 'retrasos_ml' — PoC de riesgo de retraso en SCTE.
+# Documentation: https://docs.kedro.org/en/1.3.1/configuration/parameters.html
+
+retrasos_ml:
+  # --- Recorte de la PoC -----------------------------------------------------
+  # Solo El Tepual (Puerto Montt) y solo 2020-2026: baja el parquet de 11M filas
+  # a ~94K y evita que el modelo aprenda infraestructura obsoleta (1999-2019).
+  aeropuerto_oaci: SCTE
+  fecha_desde: "2020-01-01"
+  fecha_hasta: "2026-01-01"
+  # 'U' = transporte publico regular. Es la unica actividad con itinerario
+  # estable, y sin itinerario no existe la nocion de "retraso".
+  actividades: ["U"]
+
+  # --- Reconstruccion del horario de referencia ------------------------------
+  # La bitacora JAC no publica hora programada, solo la hora real de operacion.
+  # El horario se reconstruye como la mediana circular del slot habitual de cada
+  # (aerolinea, numero_vuelo, tipo_operacion, mes, dia_semana). Ver README.
+  slot_gap_min: 120      # hueco que separa dos slots distintos del mismo vuelo
+  slot_min_obs: 2        # obs minimas para que un slot cuente como habitual
+  grupo_min_obs: 3       # obs minimas del grupo para aceptar su referencia
+  umbral_retraso_min: 15 # > 15 min sobre el horario habitual = 1 (Riesgo)
+
+  # --- Pista de El Tepual ----------------------------------------------------
+  # Pista 17/35 => rumbo 170 grados. Se usa para descomponer el viento en su
+  # componente cruzada, que es la que realmente limita la operacion.
+  rumbo_pista: 170
+
+  # --- Modelo ----------------------------------------------------------------
+  # Split TEMPORAL, no aleatorio: el modelo se vende como pronostico a futuro.
+  # 2024 elige el modelo, 2025+ se reserva y se toca una sola vez.
+  anio_validacion: 2024
+  anio_corte_test: 2025
+  random_state: 42
+
+  # Gradient boosting muy podado a proposito. Con la configuracion tipica
+  # (300 iteraciones, profundidad 6) llega a AUC 0.84 en train y 0.49 en test:
+  # memoriza ruido. Estos valores salieron de comparar contra el ano de
+  # validacion, nunca contra el de test.
+  max_iter: 40
+  learning_rate: 0.03
+  max_depth: 2
+  min_samples_leaf: 500
+  l2_regularization: 5.0
+
+  # Regresion logistica regularizada: el competidor simple y calibrado.
+  logreg_C: 0.1
