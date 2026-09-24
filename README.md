@@ -21,6 +21,7 @@
 - [Como ejecutar el proyecto](#como-ejecutar-el-proyecto)
 - [Preparacion de los datos](#preparacion-de-los-datos)
 - [Analisis Exploratorio — Graficos clave](#analisis-exploratorio--graficos-clave)
+- [Calidad de los datos — que encontramos al mirar de cerca](#calidad-de-los-datos--que-encontramos-al-mirar-de-cerca)
 - [Modelado No Supervisado — Clustering](#modelado-no-supervisado--clustering)
 - [Modelado Supervisado — Clasificacion](#modelado-supervisado--clasificacion)
 
@@ -41,6 +42,7 @@
 - [Conclusiones y Decisiones de Negocio](#conclusiones-y-decisiones-de-negocio)
 - [Trabajo futuro](#trabajo-futuro)
 - [Estructura del proyecto](#estructura-del-proyecto)
+- [Respuesta a la retroalimentacion de la EP1](#respuesta-a-la-retroalimentacion-de-la-ep1)
 
 ---
 
@@ -234,10 +236,8 @@ git clone https://github.com/donMixho/OperacionesAeronaves.git
 cd OperacionesAeronaves
 uv sync
 
-# Descargar las fuentes crudas a data/01_raw/
-#   - bitacora-vuelos.parquet y operaciones-aeropuertos.csv desde datos.gob.cl
-#   - clima diario de Puerto Montt (se baja solo):
-python scripts/descargar_clima_scte.py
+# Descargar las tres fuentes a data/01_raw/ (un solo comando, ~25 s)
+python scripts/descargar_datos.py
 
 # Ejecutar todo (~150 segundos)
 uv run kedro run
@@ -270,7 +270,7 @@ Las fuentes crudas tienen problemas tipicos de datos reales. Asi los resolvimos:
 | Problema | Solucion |
 |---|---|
 | `numero_vuelo`: 457 687 nulos (4.1%) | Se rellena con la cadena `"DESCONOCIDO"` |
-| `pmd`: 275 115 nulos (2.5%) | Se crea un flag `pmd_fue_imputado` y se imputa con la **mediana agrupada por modelo de avion** (si el modelo entero no tiene datos, se usa la mediana global) |
+| `pmd`: 300 936 faltantes (2.72%) | Incluye **25 821 registros con `pmd = 0`**, que son nulos disfrazados: un avion no puede pesar cero, y el 98.5% de ellos no venia marcado como vacio. Se tratan como faltantes y se imputan con la **mediana agrupada por modelo de avion** (si el modelo entero no tiene datos, la mediana global), dejando el flag `pmd_fue_imputado` |
 | `mes_id` no existia | Se extrae de `dt_operacion` en formato YYYYMM |
 | `internacional_domestico` no existia | Se mapea desde el booleano `es_internacional` → `'I'` o `'D'` |
 
@@ -313,7 +313,47 @@ Resultado: **99.996% de cobertura** — solo 400 filas de 11 millones quedaron s
 
 **¿Para que sirve?** Entender si el peso del avion, el mes y el volumen de operaciones tienen alguna relacion entre si antes de entrenar el modelo.
 
-**¿Que descubrimos?** El PMD tiene una correlacion positiva moderada con `es_internacional` (r = 0.31): los aviones mas pesados tienden a usarse en rutas internacionales. El flag de imputacion tiene correlacion negativa con PMD (-0.24), lo que confirma que los datos faltantes ocurren principalmente en aeronaves livianas (que tienen menor registro formal). El resto de variables son practicamente independientes entre si — buena señal para el modelo.
+**¿Que descubrimos?** El PMD es, con diferencia, la variable mas ligada a que un vuelo sea internacional: **r = 0.56**. Los aviones pesados vuelan lejos, y esa sola relacion explica buena parte de lo que despues logra el clasificador. `cnt_operaciones` le sigue de lejos (r = 0.26): los aeropuertos con mas movimiento concentran mas trafico internacional.
+
+Lo mas util, sin embargo, es lo que **no** aparece. El flag `pmd_fue_imputado` tiene correlacion **−0.003 con el PMD y −0.02 con `es_internacional`**: practicamente cero. Es decir, **los datos faltantes no se concentran en un tipo de avion ni en un tipo de vuelo** — faltan de forma esencialmente aleatoria. Esa es la mejor evidencia de que imputar con la mediana del modelo no introduce un sesgo sistematico, y es mas fuerte que la comparacion visual de distribuciones del grafico anterior.
+
+`mes_id` no se correlaciona con nada (r ≤ 0.14 con todo), lo que descarta una tendencia temporal fuerte en el peso de las aeronaves.
+
+> **Correccion respecto de una version anterior de este README.** Aqui se afirmaban r = 0.31 para PMD vs internacional y −0.24 para el flag vs PMD. Ambas cifras eran incorrectas y la segunda sostenia una conclusion falsa — que los faltantes se concentraban en aeronaves livianas. Los valores correctos son los de la matriz: **0.56 y −0.003**. Se deja constancia porque la conclusion cambia: los faltantes **no** tienen patron.
+
+---
+
+---
+
+## Calidad de los datos — que encontramos al mirar de cerca
+
+El EDA completo — `describe()` de las 16 columnas, del clima y del subconjunto de El Tepual, duplicados, outliers y analisis del target — se genera con el pipeline y vive en **[`data/08_reporting/eda_report.md`](data/08_reporting/eda_report.md)**. Se regenera en cada `kedro run`, asi que no puede quedar desactualizado respecto del codigo.
+
+Lo que encontro, y que no se veia en los graficos:
+
+**1. Hay 1 122 filas exactamente duplicadas** (0.01%) y 2 470 repeticiones de la llave `(fecha-hora, aeropuerto, matricula, tipo)`. **No se eliminan**: sin un identificador unico de operacion no se puede distinguir un registro repetido de dos movimientos reales muy seguidos, y borrarlos a ciegas sesgaria los conteos por aeropuerto.
+
+**2. El 3% de los vuelos queda fuera del rango intercuartil del PMD — y son tres cosas distintas.** Recortar en 500 toneladas para graficar, como se hacia antes, escondia el problema en vez de diagnosticarlo:
+
+| Situacion | Vuelos | Que es | Que se hizo |
+|---|---|---|---|
+| Fuselaje ancho (300–650 t) | 73 646 | B747, B777, A340 y el AN-225, que realmente pesa 640 t | **Se conservan.** Se transforman con logaritmo al modelar |
+| **Error de unidad (> 650 t)** | **1 078** | Aviones livianos con el peso en **kilogramos**: un T-34 Mentor pesa 1.3 t y figura con 1 340; un helicoptero R-44 pesa 1.1 t y figura con 1 000 | **Se documentan, no se parchean.** Corregirlos exigiria un umbral que podria dañar registros validos. Ninguno entra en la PoC |
+| **`pmd = 0`** | **25 821** | Un avion no puede pesar cero: son nulos disfrazados, y el 98.5% no venia marcado como vacio | **Corregido.** Ahora se tratan como faltantes y entran a la imputacion |
+
+El tercero era un error nuestro: la primera version imputaba solo los `NaN`, asi que 25 821 vuelos llegaban al modelo como aeronaves sin peso. Al corregirlo, la tasa de imputacion sube de 2.5% a **2.72%**.
+
+![Outliers del PMD](images/eda_08_outliers_pmd.png)
+
+**¿Para que sirve?** Distinguir una cola larga legitima de una cola sucia. El panel izquierdo esta en escala logaritmica porque en escala lineal no se ve nada.
+
+**¿Que descubrimos?** El PMD **no tiene una distribucion con outliers, tiene varias distribuciones superpuestas**: cada joroba es una familia de aeronaves — ultralivianos, aviacion general, turbohelices, jets regionales, fuselaje ancho. Por eso la regla del rango intercuartil marca un 3% de "outliers" que en su mayoria son aviones perfectamente normales, solo que de otra categoria. Es el argumento para transformar con logaritmo en vez de recortar.
+
+![El target de retraso](images/eda_09_target_retraso.png)
+
+**¿Para que sirve?** Ver el target desde tres angulos antes de modelarlo: su evolucion, su forma y su reparto entre operadores.
+
+**¿Que descubrimos?** El panel central es el importante: la distribucion del desvio es **claramente asimetrica** — cola izquierda corta, cola derecha larga. Esa asimetria es la firma de un retraso real; si fuera ruido de medicion seria simetrica. El panel izquierdo muestra que 2020 opero a menos de la mitad de volumen que 2024, lo que justifica tratar el periodo COVID como un regimen aparte.
 
 ---
 
@@ -329,12 +369,14 @@ Probamos k=2 hasta k=8. El optimo matematico es **k=4** — mayor Silhouette Sco
 
 **¿Que grupos encontramos?**
 
-| Cluster | Aeropuertos | Caracter |
-|---|---|---|
-| 0 — Regionales | 32 | Poco trafico, aviones livianos, casi sin vuelos internacionales |
-| 1 — Pesados mixtos | 16 | Volumen medio-alto, aviones de carga o turbopropulsores |
-| 2 — Hub global | 1 (SCEL) | El unico aeropuerto con perfil verdaderamente internacional (43% de sus vuelos) |
-| 3 — Hubs domesticos | 20 | Alto volumen, aviones livianos, trafico casi 100% nacional |
+| Cluster | Aeropuertos | Vuelos | % internacional | PMD medio | Caracter |
+|---|---|---|---|---|---|
+| **Pequeños / regionales** | 32 | 198 101 | 0.8% | 3.3 t | Poco trafico y aviones livianos |
+| **Pesados / carga** | 16 | 2 892 379 | 3.2% | **68.5 t** | Volumen alto con aeronaves pesadas — aqui esta El Tepual (SCTE) |
+| **Hub internacional** | 1 (SCEL) | 3 118 336 | **43.0%** | 77.0 t | El unico con perfil verdaderamente internacional |
+| **Alta aviacion general** | 20 | **4 865 381** | 0.3% | **2.0 t** | El mayor volumen de todos, pero casi todo aviacion liviana (Tobalaba, Concepcion) |
+
+> **Los nombres se derivan del perfil de cada grupo, no estan escritos a mano.** K-Means numera los clusters de forma arbitraria — el que hoy es el 1 puede ser el 3 en la proxima ejecucion — asi que etiquetarlos por indice garantiza que tarde o temprano el grafico diga una cosa y el dato otra. De hecho **eso ocurria**: una version anterior del codigo llamaba "Grandes internacionales" al grupo con 3.2% de vuelos internacionales, y "Medianos domesticos" a SCEL, que tiene 43%. Ahora el nombre sale de las caracteristicas del grupo, y figura, codigo y tabla no pueden contradecirse.
 
 > SCEL forma un cluster propio. Es tan distinto al resto que el algoritmo lo aisla solo — lo cual tiene todo el sentido operativo.
 
@@ -365,14 +407,14 @@ Probamos k=2 hasta k=8. El optimo matematico es **k=4** — mayor Silhouette Sco
 
 **¿Para que sirve?** Medir la capacidad del modelo para separar vuelos internacionales de domesticos en cualquier umbral de decision.
 
-**¿Que descubrimos?** Un **ROC-AUC de 0.964** significa que el modelo clasifica correctamente el 96.4% de los pares vuelo-internacional vs. vuelo-domestico. La validacion cruzada de 5 particiones confirma que este resultado es estable (0.964 ± 0.001) — no es suerte de una sola particion.
+**¿Que descubrimos?** Un **ROC-AUC de 0.964** significa que el modelo clasifica correctamente el 96.4% de los pares vuelo-internacional vs. vuelo-domestico. La validacion cruzada de 5 particiones confirma que este resultado es estable (0.963 ± 0.001) — no es suerte de una sola particion.
 
 ### Metricas del modelo
 
 | Metrica | Valor | Que significa en la practica |
 |---|---|---|
 | **ROC-AUC** | 0.964 | Excelente capacidad de discriminacion global |
-| **Recall** | 0.965 | Detecta el 96.5% de los vuelos internacionales reales |
+| **Recall** | 0.963 | Detecta el 96.3% de los vuelos internacionales reales |
 | **Precision** | 0.465 | De cada 10 predichos como "internacional", ~5 realmente lo son |
 | **F1** | 0.628 | Balance entre precision y recall |
 | **Accuracy** | 0.853 | 8 de cada 10 predicciones son correctas |
@@ -780,7 +822,21 @@ Las grandes entran casi completas; los operadores pequeños pierden hasta **1 de
 | **Uso dual / vigilancia** | Los datos de movimiento de aeronaves sirven para seguir personas | Filtro a aviacion comercial regular; matricula excluida de las features |
 | **Presentar un modelo fallido como exitoso** | Es el riesgo etico **mas probable** en un proyecto academico con nota de por medio | Los umbrales de despliegue se fijaron antes de ver el test, y se reporta que 3 de 4 no se cumplen |
 
-### 4. La decision etica central del proyecto
+### 4. Impacto de los errores — quien paga cada equivocacion
+
+Un falso positivo y un falso negativo **no cuestan lo mismo**, y el costo cambia segun el modelo. Esta tabla es la que deberia mirar quien decida el umbral.
+
+| Modelo | Falso positivo | Falso negativo | Quien absorbe el error | Umbral elegido y por que |
+|---|---|---|---|---|
+| **Clasificador internacional** (baseline) | Se prepara aduana, rampa y gate para un vuelo domestico. Cuesta horas-persona y espacio ocioso | Llega un vuelo internacional sin aduana ni gate habilitado. Retrasa a los pasajeros y puede incumplir normativa | El aeropuerto, en costo operativo | Se prioriza **recall 0.963** sobre precision 0.466: quedarse sin gate es mucho peor que preparar uno de mas |
+| **Score de Riesgo** (PoC) | Se moviliza tripulacion de reserva para un vuelo que salia a tiempo. Costo directo y desgaste del equipo | No se anticipa un retraso: conexiones perdidas y compensaciones | La aerolinea, y los pasajeros | **Ninguno.** Con lift 1.12 el modelo no distingue, asi que cualquier umbral reparte los costos casi al azar |
+| **Segmentacion de vuelos** | Un vuelo entra al grupo critico sin merecerlo: recibe buffer de mas | Un vuelo problematico queda fuera y no se gestiona | La aerolinea, en eficiencia | Es descriptiva y **reversible**: se revisa cada trimestre con los datos nuevos |
+
+**El asimetrico de verdad es el primero.** En el clasificador internacional, de cada 10 vuelos marcados solo ~5 lo son — pero esa imprecision se eligio a conciencia, porque el costo de no detectar uno es mucho mayor que el de prepararse de mas.
+
+**Y el caso grave seria el segundo si se desplegara.** Un score que no discrimina, usado para decidir turnos o reservas, repartiria costos reales entre trabajadores y pasajeros con la apariencia de una decision tecnica. Por eso el proyecto **no lo despliega**.
+
+### 5. La decision etica central del proyecto
 
 Habia dos caminos al llegar a los resultados finales. El primero: buscar un split que diera mejores metricas, elegir el mejor de varios experimentos y presentar un AUC favorable. Con un split aleatorio en vez de temporal, las cifras de este proyecto habrian sido notablemente mejores — y falsas, porque el modelo habria visto vuelos del mismo dia en entrenamiento y en prueba.
 
@@ -798,8 +854,8 @@ SCEL concentra el trafico internacional de forma casi monopolica. Cualquier deci
 **2. Los aeropuertos del Cluster 3 son los grandes olvidados del analisis tradicional.**
 Aeropuertos como Tobalaba (SCTB) o Concepcion (SCIE) tienen volumenes altisimos de operaciones, pero casi toda es aviacion general o entrenamiento. No son "grandes" por tener muchos pasajeros — son grandes por intensidad de uso. Requieren regulacion diferenciada.
 
-**3. La imputacion de PMD es confiable.**
-El 2.5% de registros con PMD faltante fue imputado con la mediana del modelo de avion. La distribucion resultante es indistinguible de la original.
+**3. La imputacion de PMD es confiable, y ahora tambien completa.**
+El 2.72% de registros sin PMD se imputa con la mediana del modelo de avion, y la distribucion resultante es indistinguible de la original. Ese porcentaje incluye **25 821 registros que llegaban con `pmd = 0`** — nulos disfrazados que la primera version del pipeline dejaba pasar como aviones sin peso.
 
 **4. El clasificador de vuelos internacionales puede operar en produccion.**
 Con ROC-AUC de 0.964 estable en CV-5, esta listo para aplicarse a registros nuevos. El modelo serializado esta en `data/06_models/random_forest.pkl`.
@@ -831,6 +887,50 @@ Ordenado por impacto esperado, no por facilidad:
 
 ---
 
+---
+
+## Respuesta a la retroalimentacion de la EP1
+
+Cada observacion del docente, y que se hizo con ella.
+
+| # | Observacion | Estado | Donde verlo |
+|---|---|---|---|
+| 1 | No existe notebook `.ipynb`; el README no tiene objetivos/KPIs ni CRISP-DM | **Resuelto** | [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) (47 celdas ejecutables) · [Objetivos](#problema-de-negocio-y-objetivos) · [KPIs](#kpis--como-se-mide-el-exito) · [CRISP-DM](#metodologia--crisp-dm) |
+| 2 | EDA basico: sin `describe()`, duplicados, outliers, EDA de SCTE ni del target | **Resuelto** | [Calidad de los datos](#calidad-de-los-datos--que-encontramos-al-mirar-de-cerca) y el reporte completo en [`data/08_reporting/eda_report.md`](data/08_reporting/eda_report.md) |
+| 3 | El texto contradice las figuras (correlaciones y etiquetas de cluster) | **Resuelto, y era peor de lo señalado** | Ver el detalle abajo |
+| 4 | "Alerta temprana de retrasos" no usaba datos de retrasos | **Rehecho de raiz** | [Como se construye el retraso](#como-se-construye-el-retraso-si-el-dato-no-lo-trae) |
+| 5 | Sin script de descarga; columnas del clima no coinciden; posible desajuste de zona horaria | **Resuelto y verificado** | [`scripts/descargar_datos.py`](scripts/descargar_datos.py) · ver nota de zona horaria abajo |
+| 6 | Residuo Waymo y carpetas `.claude`/`.agents` | **Resuelto** | 97 archivos eliminados del control de versiones |
+| 7 | La etica no cubre privacidad, sesgo de cobertura ni impacto de errores | **Resuelto** | [Etica, sesgos y privacidad](#etica-sesgos-y-privacidad) |
+| 8 | Participacion desigual en el historial de commits | Pendiente del equipo | — |
+
+### Sobre el punto 3 — las contradicciones eran reales
+
+**Correlaciones.** El README afirmaba r = 0.31 entre PMD y `es_internacional`, y −0.24 entre el flag de imputacion y el PMD. Los valores reales son **0.56 y −0.003**. La segunda cifra no era solo un error numerico: sostenia la conclusion de que "los datos faltantes ocurren principalmente en aeronaves livianas", que es **falsa**. La correlacion real es practicamente cero, lo que significa que los faltantes **no tienen patron** — una conclusion distinta, y mejor para el proyecto, porque refuerza que la imputacion no sesga.
+
+**Etiquetas de cluster.** El codigo tenia los nombres escritos a mano por indice:
+
+```python
+CLUSTER_LABELS = {0: "Pequeños / regionales", 1: "Grandes internacionales", ...}
+```
+
+K-Means numera los clusters de forma **arbitraria**, asi que eso estaba condenado a desincronizarse — y lo estaba: la figura llamaba *"Grandes internacionales"* al grupo con 3.2% de vuelos internacionales, y *"Medianos domesticos"* a SCEL, que tiene 43%. Ahora el nombre **se deriva del perfil de cada grupo** (`_nombrar_clusters`), asi que figura, codigo y README no pueden contradecirse aunque cambien los indices.
+
+### Sobre el punto 4 — el modulo se rehizo entero
+
+La observacion daba en el clavo: aquel modulo predecia clima adverso a +3 h con umbrales elegidos por nosotros, y lo llamaba "alerta de retrasos" sin usar un solo dato de retraso.
+
+El pipeline `retrasos_ml` actual **si mide retrasos**. Como la bitacora no trae hora programada, el horario de referencia se **reconstruye** desde la propia bitacora (mediana circular del slot habitual de cada vuelo), y el target es la desviacion respecto de ese horario. El metodo, sus supuestos y sus limites estan documentados, junto con la prueba de validacion: la cola izquierda de la distribucion tiene que ser corta, porque un avion no despega horas antes de lo habitual.
+
+Y el resultado cambio la conclusion del proyecto: **el clima casi no explica los retrasos**.
+
+### Sobre el punto 5 — zona horaria verificada
+
+`dt_operacion` viene en `America/Santiago`. La llave de cruce se construye como `dt_operacion.dt.tz_localize(None).dt.normalize()`, es decir **se toma la fecha local y despues se descarta la zona**, nunca al reves. Un vuelo de las 22:12 en Puerto Montt (01:12 UTC del dia siguiente) se cruza con el clima del **mismo dia local**, que es lo correcto porque el clima diario tambien esta en hora local. Verificado sobre los vuelos nocturnos, que son los unicos donde la distincion importa.
+
+La fuente de clima ademas **cambio**: ya no es Open-Meteo sino **Meteostat, estacion 85799**, descargada por script con las columnas declaradas explicitamente.
+
+
 ## Estructura del proyecto
 
 ```
@@ -857,7 +957,8 @@ OperacionesAeronaves/
 │   └── informe_ml_operaciones.ipynb   ← informe ejecutable, recorre CRISP-DM
 │
 ├── scripts/
-│   └── descargar_clima_scte.py   ← descarga el clima desde Meteostat
+│   ├── descargar_datos.py        ← descarga las tres fuentes
+│   └── descargar_clima_scte.py   ← solo el clima (Meteostat)
 │
 ├── src/operaciones_aeronaves/pipelines/
 │   ├── data_inventory/  ← escaneo y perfilado de archivos raw

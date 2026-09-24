@@ -167,6 +167,47 @@ def eda_avanzado(vuelos: pd.DataFrame, perfil: pd.DataFrame) -> pd.DataFrame:
 # CLUSTERING NO SUPERVISADO
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _nombrar_clusters(resultado: pd.DataFrame) -> dict[int, str]:
+    """Deriva el nombre de cada cluster de sus propias caracteristicas.
+
+    K-Means numera los clusters de forma arbitraria: el que hoy es el 1 puede
+    ser el 3 en la proxima ejecucion. Etiquetarlos a mano por indice —como
+    estaba antes— garantiza que tarde o temprano el grafico diga una cosa y el
+    dato otra. Aqui el nombre se deduce del perfil, asi que figura, codigo y
+    README no pueden contradecirse.
+
+    El orden de asignacion importa: primero se reserva el hub internacional,
+    despues el de aeronaves mas pesadas, y entre los que quedan se distingue el
+    de alto volumen con aviones livianos (aviacion general) del resto.
+    """
+    perfiles = resultado.groupby("cluster").agg(
+        pct_intl=("pct_intl", "mean"),
+        pmd=("pmd_mediana", "mean"),
+        vuelos=("total_vuelos", "mean"),
+    )
+    nombres: dict[int, str] = {}
+    pendientes = list(perfiles.index)
+
+    def _reservar(columna: str, nombre: str) -> None:
+        if not pendientes:
+            return
+        elegido = perfiles.loc[pendientes, columna].idxmax()
+        nombres[int(elegido)] = nombre
+        pendientes.remove(elegido)
+
+    _reservar("pct_intl", "Hub internacional")
+    _reservar("pmd", "Pesados / carga")
+    _reservar("vuelos", "Alta aviacion general")
+    for restante in pendientes:
+        nombres[int(restante)] = "Pequeños / regionales"
+
+    logger.info(
+        "Nombres derivados de los clusters: %s",
+        {k: nombres[k] for k in sorted(nombres)},
+    )
+    return nombres
+
+
 def cluster_aeropuertos(perfil: pd.DataFrame) -> tuple:
     """K-Means (k=4) sobre el perfil de aeropuertos.
 
@@ -200,12 +241,7 @@ def cluster_aeropuertos(perfil: pd.DataFrame) -> tuple:
     resultado["pca_2"] = coords[:, 1]
 
     CLUSTER_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#C44E52"}
-    CLUSTER_LABELS = {
-        0: "Pequeños / regionales",
-        1: "Grandes internacionales",
-        2: "Medianos domésticos",
-        3: "Alta aviación general",
-    }
+    CLUSTER_LABELS = _nombrar_clusters(resultado)
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 

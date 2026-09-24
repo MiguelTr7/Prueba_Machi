@@ -37,6 +37,16 @@ def preprocess_vuelos(vuelos: pd.DataFrame) -> pd.DataFrame:
 
     # pmd: coerce a float, crear flag, imputar con mediana grupal
     df["pmd"] = pd.to_numeric(df["pmd"], errors="coerce")
+
+    # Un avion no puede pesar cero: el 0 es un nulo disfrazado. Son ~26 mil
+    # registros que llegan con el valor literal 0 en vez de vacio, asi que
+    # imputar solo los NaN los dejaba pasar intactos al modelo.
+    ceros = int((df["pmd"] == 0).sum())
+    if ceros:
+        logger.info("pmd = 0 en %d registros: se tratan como faltantes", ceros)
+        df.loc[df["pmd"] == 0, "pmd"] = pd.NA
+        df["pmd"] = pd.to_numeric(df["pmd"], errors="coerce")
+
     df["pmd_fue_imputado"] = df["pmd"].isna().astype("int8")
 
     global_median = df["pmd"].median()

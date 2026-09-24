@@ -16,6 +16,7 @@ from .nodes import (
     preparar_clima_scte,
     train_modelo_retrasos,
 )
+from .eda import analisis_exploratorio
 from .segmentacion import perfilar_vuelos, segmentar_dias, segmentar_vuelos
 
 
@@ -70,6 +71,12 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs=["perfil_vuelos", "params:retrasos_ml"],
                 outputs=["segmentos_vuelos", "modelo_segmentacion"],
                 name="segmentar_vuelos_node",
+            ),
+            node(
+                func=analisis_exploratorio,
+                inputs=["vuelos_con_operaciones", "clima_scte_features", "vuelos_clima"],
+                outputs="eda_report_md",
+                name="analisis_exploratorio_node",
             ),
             node(
                 func=segmentar_dias,

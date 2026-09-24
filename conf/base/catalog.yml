@@ -159,3 +159,11 @@ modelo_segmentacion:
   type: pickle.PickleDataset
   filepath: data/06_models/modelo_segmentacion.pkl
   backend: joblib
+
+# 08_reporting: el EDA completo, regenerado en cada corrida
+eda_report_md:
+  type: text.TextDataset
+  filepath: data/08_reporting/eda_report.md
+  fs_args:
+    open_args_save: { mode: w, encoding: utf-8 }
+    open_args_load: { mode: r, encoding: utf-8 }

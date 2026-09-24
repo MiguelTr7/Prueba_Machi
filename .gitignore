@@ -26,6 +26,11 @@ data/**
 # ignore kedro-viz metadata
 .viz
 
+# Configuracion de herramientas de asistencia: no es parte del proyecto
+.claude/
+.agents/
+skills-lock.json
+
 # ignore file based logs
 *.log
 
