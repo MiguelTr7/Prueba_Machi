@@ -252,7 +252,7 @@ uv run kedro run --pipeline=retrasos_ml   # ~94 segundos
 uv run pytest
 ```
 
-**Informe ejecutable.** El notebook [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) recorre el proyecto completo siguiendo las seis fases de CRISP-DM, llamando a **las mismas funciones** que ejecuta el pipeline — no duplica logica. Corre en ~3 minutos:
+**Informe ejecutable.** El notebook [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) recorre las seis fases de CRISP-DM y **reproduce las diez etapas del informe** — el target, el clima, los dos modelos supervisados del PoC, la segmentacion no supervisada y los dos modelos del baseline. Llama a **las mismas funciones** que ejecuta el pipeline, asi que no puede desincronizarse del codigo. Corre en ~1 minuto:
 
 ```bash
 uv run jupyter lab notebooks/informe_ml_operaciones.ipynb
@@ -940,7 +940,7 @@ Cada observacion del docente, y que se hizo con ella.
 
 | # | Observacion | Estado | Donde verlo |
 |---|---|---|---|
-| 1 | No existe notebook `.ipynb`; el README no tiene objetivos/KPIs ni CRISP-DM | **Resuelto** | [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) (53 celdas ejecutables) · [Objetivos](#problema-de-negocio-y-objetivos) · [KPIs](#kpis--como-se-mide-el-exito) · [CRISP-DM](#metodologia--crisp-dm) |
+| 1 | No existe notebook `.ipynb`; el README no tiene objetivos/KPIs ni CRISP-DM | **Resuelto** | [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) (64 celdas ejecutables) · [Objetivos](#problema-de-negocio-y-objetivos) · [KPIs](#kpis--como-se-mide-el-exito) · [CRISP-DM](#metodologia--crisp-dm) |
 | 2 | EDA basico: sin `describe()`, duplicados, outliers, EDA de SCTE ni del target | **Resuelto** | [Calidad de los datos](#calidad-de-los-datos--que-encontramos-al-mirar-de-cerca) y el reporte completo en [`data/08_reporting/eda_report.md`](data/08_reporting/eda_report.md) |
 | 3 | El texto contradice las figuras (correlaciones y etiquetas de cluster) | **Resuelto, y era peor de lo señalado** | Ver el detalle abajo |
 | 4 | "Alerta temprana de retrasos" no usaba datos de retrasos | **Rehecho de raiz** | [Como se construye el retraso](#como-se-construye-el-retraso-si-el-dato-no-lo-trae) |
