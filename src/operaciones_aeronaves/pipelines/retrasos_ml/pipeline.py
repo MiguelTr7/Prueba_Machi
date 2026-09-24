@@ -16,6 +16,7 @@ from .nodes import (
     preparar_clima_scte,
     train_modelo_retrasos,
 )
+from .segmentacion import perfilar_vuelos, segmentar_dias, segmentar_vuelos
 
 
 def create_pipeline(**kwargs) -> Pipeline:
@@ -48,7 +49,7 @@ def create_pipeline(**kwargs) -> Pipeline:
             node(
                 func=train_modelo_retrasos,
                 inputs=["vuelos_clima", "params:retrasos_ml"],
-                outputs=["metricas_retrasos", "modelo_retrasos"],
+                outputs=["metricas_retrasos", "busqueda_hiperparametros", "modelo_retrasos"],
                 name="train_modelo_retrasos_node",
             ),
             node(
@@ -56,6 +57,25 @@ def create_pipeline(**kwargs) -> Pipeline:
                 inputs=["vuelos_clima", "modelo_retrasos"],
                 outputs="efecto_clima_retraso",
                 name="evaluar_impacto_clima_node",
+            ),
+            # --- Aprendizaje no supervisado sobre el mismo problema ---------
+            node(
+                func=perfilar_vuelos,
+                inputs=["vuelos_clima", "params:retrasos_ml"],
+                outputs="perfil_vuelos",
+                name="perfilar_vuelos_node",
+            ),
+            node(
+                func=segmentar_vuelos,
+                inputs=["perfil_vuelos", "params:retrasos_ml"],
+                outputs=["segmentos_vuelos", "modelo_segmentacion"],
+                name="segmentar_vuelos_node",
+            ),
+            node(
+                func=segmentar_dias,
+                inputs=["vuelos_clima", "params:retrasos_ml"],
+                outputs="segmentos_dias",
+                name="segmentar_dias_node",
             ),
         ]
     )

@@ -18,6 +18,10 @@ from operaciones_aeronaves.pipelines.retrasos_ml.nodes import (
     cruzar_vuelos_clima,
     preparar_clima_scte,
 )
+from operaciones_aeronaves.pipelines.retrasos_ml.segmentacion import (
+    _elegir_k,
+    perfilar_vuelos,
+)
 
 PARAMS = {
     "slot_gap_min": 120,
@@ -125,6 +129,7 @@ def _bitacora(horas: list[str], fecha_base: str = "2024-03-01") -> pd.DataFrame:
         "aerolinea_dgac": "LAN",
         "numero_vuelo": "61",
         "tipo_operacion": "A",
+        "es_internacional": False,
     })
 
 
@@ -223,3 +228,58 @@ def test_el_cruce_no_pierde_ni_duplica_vuelos():
     # Solo la primera fecha existe en el clima de prueba; las otras quedan nulas
     # sin eliminar el vuelo.
     assert salida["tavg"].notna().sum() == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Seleccion de k en el aprendizaje no supervisado
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_descarta_el_k_que_aisla_un_puñado_de_casos():
+    """El silhouette premia aislar outliers; la regla de tamano lo impide.
+
+    Tres nubes compactas y dos puntos lejanos: con k=4 o k=5 el algoritmo
+    aislaria los outliers en clusters diminutos, con un silhouette excelente
+    y ninguna utilidad para decidir.
+    """
+    rng = np.random.default_rng(0)
+    nubes = np.vstack([
+        rng.normal(loc, 0.25, size=(40, 2)) for loc in ([0, 0], [8, 0], [0, 8])
+    ])
+    X = np.vstack([nubes, [[14.0, 14.0], [15.0, 15.0]]])
+
+    k, diagnostico = _elegir_k(X, k_min=2, k_max=6, min_pct=0.05, random_state=42)
+
+    # Sin la regla de tamano ganaria k=4, que aisla los dos outliers.
+    assert int(diagnostico.loc[diagnostico.silhouette.idxmax(), "k"]) == 4
+    assert k == 3
+    # El diagnostico deja por escrito que hubo k con mejor silhouette y por que
+    # se descartaron: es la evidencia que respalda la eleccion.
+    descartados = diagnostico[~diagnostico.admisible]
+    assert not descartados.empty
+    assert (descartados.cluster_mas_chico_pct < 0.05).all()
+
+
+def test_el_diagnostico_marca_el_k_elegido():
+    rng = np.random.default_rng(1)
+    X = np.vstack([rng.normal(loc, 0.3, size=(30, 2)) for loc in ([0, 0], [6, 6])])
+
+    k, diagnostico = _elegir_k(X, k_min=2, k_max=5, min_pct=0.1, random_state=42)
+
+    assert diagnostico.elegido.sum() == 1
+    assert int(diagnostico.loc[diagnostico.elegido, "k"].iloc[0]) == k
+
+
+def test_perfil_de_vuelos_descarta_slots_con_pocas_operaciones():
+    """Un slot con 3 vuelos no tiene comportamiento estable que describir."""
+    frecuente = _bitacora(["11:00", "11:05", "10:58", "11:02", "11:45"])
+    salida = construir_target_retraso(frecuente, PARAMS)
+    salida["hora_programada"] = salida["hora_referencia_min"] / 60.0
+
+    perfil = perfilar_vuelos(salida, {"min_ops_slot": 30})
+    assert perfil.empty
+
+    perfil = perfilar_vuelos(salida, {"min_ops_slot": 3})
+    assert len(perfil) == 1
+    assert perfil.iloc[0]["n_operaciones"] == 5
+    # La variabilidad es el rango intercuartil del desvio, no su promedio.
+    assert perfil.iloc[0]["variabilidad_min"] >= 0

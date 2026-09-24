@@ -31,6 +31,8 @@
 - [El cruce con el clima](#el-cruce-con-el-clima)
 - [¿Cuanto retrasa realmente el clima?](#cuanto-retrasa-realmente-el-clima)
 - [El Score de Riesgo Operativo](#el-score-de-riesgo-operativo)
+- [Aprendizaje no supervisado sobre el problema de retrasos](#aprendizaje-no-supervisado-sobre-el-problema-de-retrasos)
+- [Interpretacion del desempeño — que significa cada numero](#interpretacion-del-desempeño--que-significa-cada-numero)
 - [Ventana de Confianza — 7 a 14 dias](#ventana-de-confianza--7-a-14-dias)
 
 **Cierre**
@@ -80,7 +82,7 @@ La hipotesis de partida — la que el equipo quiso poner a prueba — es que **e
 
 | # | Objetivo | Estado |
 |---|---|---|
-| O1 | Construir un pipeline reproducible de ingesta, limpieza e integracion de las tres fuentes | ✅ Cumplido — 18 nodos Kedro, 146 s |
+| O1 | Construir un pipeline reproducible de ingesta, limpieza e integracion de las tres fuentes | ✅ Cumplido — 21 nodos Kedro, 150 s |
 | O2 | Derivar una medida de retraso valida a partir de datos que **no** incluyen hora programada | ✅ Cumplido — horario reconstruido por slots |
 | O3 | Cruzar vuelos y clima a nivel diario sin degradar el rendimiento | ✅ Cumplido — 71 606 vuelos, 0 sin clima |
 | O4 | Cuantificar el efecto del clima sobre la tasa de retraso | ✅ Cumplido — el efecto es casi nulo salvo viento cruzado extremo |
@@ -115,9 +117,9 @@ Un modelo predictivo solo se despliega si supera al metodo que ya existe (que ho
 | KPI del modelo | Umbral para desplegar | Resultado obtenido | ¿Pasa? |
 |---|---|---|---|
 | **Lift sobre la tasa base** | ≥ 1.50 | **1.12** | ❌ No |
-| **ROC-AUC en datos futuros** | ≥ 0.65 | **0.534** | ❌ No |
+| **ROC-AUC en datos futuros** | ≥ 0.65 | **0.524** | ❌ No |
 | **Brier score (calibracion)** | ≤ 0.13 | **0.119** | ✅ Si |
-| **Aporte del clima al AUC** | > 0 | **−0.013** (lo empeora) | ❌ No |
+| **Aporte del clima al AUC** | > 0 | **−0.015** (lo empeora) | ❌ No |
 
 **Tres de los cuatro KPIs no se cumplen, y el proyecto lo declara abiertamente.** El unico que pasa es la calibracion — el modelo es honesto sobre su propia incertidumbre, pero esa incertidumbre es demasiado alta para decidir con ella.
 
@@ -168,14 +170,14 @@ Las tres son **publicas y de acceso abierto**; ninguna requiere credenciales ni 
 | **Catalogo de datos (`catalog.yml`)** | Registro central de datasets | Nadie escribe rutas de archivo a mano. Un integrante puede cambiar donde vive un dato sin romperle el codigo a los demas |
 | **`parameters_*.yml`** | Configuracion separada del codigo | Cambiar de aeropuerto o de umbral de retraso no requiere tocar Python — importa para que el PoC sea auditable |
 | **uv** | Entorno reproducible (`uv.lock`) | Garantiza que los cinco integrantes corran exactamente las mismas versiones; elimina el "en mi maquina funciona" |
-| **pytest** | Pruebas automatizadas | 16 tests cubren la logica de reconstruccion horaria, que es la parte del codigo donde un error no se ve en las metricas agregadas |
+| **pytest** | Pruebas automatizadas | 26 tests cubren la reconstruccion horaria y la seleccion de k, que son las partes donde un error no se ve en las metricas agregadas |
 | **Jupyter** | Informe ejecutable ([notebooks/](notebooks/)) | Permite que un evaluador recorra el proyecto paso a paso sin leer el codigo fuente |
 
 ---
 
 ## Arquitectura y Pipeline
 
-El proyecto esta construido con **Kedro**, un framework que convierte cada transformacion en un nodo trazable y reproducible. El flujo completo tiene **18 nodos** que corren en ~146 segundos.
+El proyecto esta construido con **Kedro**, un framework que convierte cada transformacion en un nodo trazable y reproducible. El flujo completo tiene **21 nodos** que corren en ~150 segundos.
 
 ```
 vuelos_raw (11M filas)                        clima_diario_scte.csv (2 192 dias)
@@ -203,7 +205,12 @@ construir_target_retraso               │
     └────────▶ cruzar_vuelos_clima ◀───┘
                     │ (03_primary, LEFT JOIN por fecha_cruce)
                     ├──▶ train_modelo_retrasos  ─▶ modelo_retrasos.pkl
-                    └──▶ evaluar_impacto_clima  ─▶ 4 graficos + tabla de efecto
+                    │                           └─ busqueda de 30 configuraciones
+                    ├──▶ evaluar_impacto_clima  ─▶ graficos + tabla de efecto
+                    │
+                    │   ── no supervisado ──
+                    ├──▶ perfilar_vuelos ── segmentar_vuelos ─▶ modelo_segmentacion.pkl
+                    └──▶ segmentar_dias         ─▶ arquetipos de dia
 ```
 
 **Pipelines registrados:**
@@ -213,7 +220,7 @@ construir_target_retraso               │
 | `data_inventory` | Inventario de archivos en `data/01_raw/` |
 | `data_processing` | Limpieza, JOIN y EDA basico |
 | `ml` | EDA avanzado, clustering y clasificacion (baseline) |
-| `retrasos_ml` | PoC de riesgo de retraso en Puerto Montt con datos de clima |
+| `retrasos_ml` | PoC de retrasos: modelos supervisados, segmentacion no supervisada y evaluacion |
 
 El baseline **no fue modificado**. `retrasos_ml` es un pipeline aparte que parte de la misma fuente cruda.
 
@@ -232,16 +239,16 @@ uv sync
 #   - clima diario de Puerto Montt (se baja solo):
 python scripts/descargar_clima_scte.py
 
-# Ejecutar todo (~146 segundos)
+# Ejecutar todo (~150 segundos)
 uv run kedro run
 
 # O por partes
 uv run kedro run --pipeline=data_processing
 uv run kedro run --pipeline=ml
-uv run kedro run --pipeline=retrasos_ml   # ~21 segundos
+uv run kedro run --pipeline=retrasos_ml   # ~30 segundos
 
-# Pruebas (16 tests sobre la reconstruccion del horario)
-uv run pytest tests/pipelines/retrasos_ml/
+# Pruebas (26 tests)
+uv run pytest
 ```
 
 **Informe ejecutable.** El notebook [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) recorre el proyecto completo siguiendo las seis fases de CRISP-DM, llamando a **las mismas funciones** que ejecuta el pipeline — no duplica logica. Corre en ~1 minuto:
@@ -521,24 +528,45 @@ El modelo se ofrece como pronostico a futuro, asi que evaluarlo con un split ale
 | Validacion | 2024 | 14 850 | Elegir modelo e hiperparametros |
 | **Prueba** | **2025+** | **14 689** | Se toca **una sola vez** |
 
+### Que dos algoritmos, y por que
+
+| Algoritmo | Por que entra | Configuracion final |
+|---|---|---|
+| **HistGradientBoosting** | Es el estandar para datos tabulares: captura interacciones no lineales entre hora, aerolinea y clima sin pedir escalado ni codificacion previa, y maneja nulos de forma nativa | `max_iter=150, learning_rate=0.05, max_depth=4, min_samples_leaf=50, l2=1.0` |
+| **Regresion Logistica** | Entra como contraparte deliberadamente simple. **Si un modelo lineal iguala al boosting, es señal de que no hay estructura no lineal que aprender** — y eso es exactamente lo que ocurrio. Ademas entrega probabilidades calibradas de fabrica, que es lo que necesita un score leido como porcentaje | `C=1.0` (regularizacion L2 moderada) |
+
+El problema es una **clasificacion binaria desbalanceada** (15% de positivos), asi que ademas de ROC se reporta **Average Precision**, que compara contra la tasa base en vez de contra el azar.
+
+### Como se eligio la configuracion (y no a ojo)
+
+Se evaluaron **30 configuraciones** — 6 del boosting y 4 de la logistica, por cada uno de los 3 conjuntos de variables. Cada una se ajusta con el tramo de entrenamiento y se puntua contra **2024**; el tramo de prueba no participa en ninguna decision.
+
+![Busqueda de hiperparametros](images/rt_08_busqueda_hiperparametros.png)
+
+**¿Para que sirve?** Mostrar que la regularizacion agresiva del modelo final es una conclusion del dato, no una decision arbitraria.
+
+**¿Que descubrimos?** La version flexible del boosting — la configuracion con la que cualquiera empezaria — alcanza **ROC-AUC 0.845 en entrenamiento y 0.518 en validacion**. Esa brecha de 0.33 es memorizacion pura: el modelo aprende el ruido de 2020-2023 y no le sirve de nada en 2024. A medida que se restringe la profundidad y se exige mas observaciones por hoja, el AUC de entrenamiento cae y el de validacion **sube**. El mejor punto de validacion esta en un arbol de profundidad 4 con brecha de apenas 0.10.
+
+> Este grafico es la respuesta a "¿por que su modelo es tan simple?". Porque cualquier cosa mas compleja memoriza en vez de aprender, y lo podemos demostrar.
+
 ### El experimento que responde la pregunta
 
 Cada modelo se entrena **tres veces**: solo con variables de operacion, solo con clima, y con ambas. Si sumar el clima no mueve el AUC, el clima no explica el retraso. Resultados sobre 2025 (tasa base 13.8%):
 
 | Variables | Modelo | AUC train | AUC validacion | **AUC test** |
 |---|---|---|---|---|
-| **Solo operacion** | **GradientBoosting** | 0.579 | **0.545** | **0.534** ✅ |
+| **Solo operacion** | **GradientBoosting** | 0.637 | **0.569** | **0.524** ✅ |
 | Solo operacion | Regresion Logistica | 0.555 | 0.540 | 0.533 |
 | Solo clima | GradientBoosting | 0.565 | 0.510 | **0.469** |
 | Solo clima | Regresion Logistica | 0.526 | 0.519 | 0.488 |
-| Clima + operacion | GradientBoosting | 0.587 | 0.544 | 0.521 |
+| Clima + operacion | GradientBoosting | 0.604 | 0.545 | 0.513 |
 | Clima + operacion | Regresion Logistica | 0.559 | 0.536 | 0.522 |
 
 **Tres lecturas, todas incomodas y todas honestas:**
 
-1. **Con solo clima, el modelo queda por debajo del azar** (AUC 0.469 y 0.488, contra 0.5 de una moneda). El clima diario, por si solo, no contiene informacion util sobre si un vuelo se va a retrasar.
-2. **Agregar el clima a las variables de operacion empeora el modelo** (0.534 → 0.521). No es un error de codigo: es el comportamiento clasico de una variable que aporta ruido en vez de señal, y que el modelo termina usando para memorizar el pasado.
-3. **El mejor modelo llega a AUC 0.534.** Eso es apenas mejor que el azar. El pipeline selecciona automaticamente el ganador por el año de validacion, y **el ganador no usa clima**.
+1. **Con solo clima, el modelo queda por debajo del azar** (AUC 0.469 y 0.486, contra 0.5 de una moneda). El clima diario, por si solo, no contiene informacion util sobre si un vuelo se va a retrasar.
+2. **Agregar el clima a las variables de operacion empeora el modelo** (0.533 → 0.518 con el mejor de cada conjunto). No es un error de codigo: es el comportamiento clasico de una variable que aporta ruido en vez de señal, y que el modelo termina usando para memorizar el pasado.
+3. **El mejor modelo llega a AUC 0.533.** Eso es apenas mejor que el azar. El pipeline selecciona automaticamente el ganador por el año de validacion, y **el ganador no usa clima**.
 
 ![Importancia de variables](images/rt_02_importancia.png)
 
@@ -558,13 +586,13 @@ Cada modelo se entrena **tres veces**: solo con variables de operacion, solo con
 
 **¿Para que sirve?** El panel izquierdo mide la discriminacion; el derecho verifica que el score se pueda leer como porcentaje (que un score de 30% corresponda de verdad a un 30% de vuelos retrasados).
 
-**¿Que descubrimos?** La curva ROC se despega apenas de la diagonal del azar (AUC 0.534). El panel de calibracion es aun mas elocuente: **todos los scores del modelo caben entre 13.5% y 19%**. El modelo esta prediciendo casi la tasa base para todos los vuelos, porque no encontro nada que le permita distinguirlos. Esta bien calibrado — y es casi inutil para decidir.
+**¿Que descubrimos?** La curva ROC se despega apenas de la diagonal del azar (AUC 0.524). El panel de calibracion es aun mas elocuente: **todos los scores del modelo caben entre 13.5% y 19%**. El modelo esta prediciendo casi la tasa base para todos los vuelos, porque no encontro nada que le permita distinguirlos. Esta bien calibrado — y es casi inutil para decidir.
 
 ### Metricas finales del Score de Riesgo
 
 | Metrica | Valor | Que significa |
 |---|---|---|
-| ROC-AUC (test 2025) | **0.534** | Apenas sobre el azar (0.5) |
+| ROC-AUC (test 2025) | **0.524** | Apenas sobre el azar (0.5) |
 | Average Precision | 0.155 | Contra una tasa base de 0.138 |
 | Lift vs azar | **1.12** | Solo un 12% mejor que adivinar |
 | Brier score | 0.119 | Bien calibrado, pero sobre un rango estrecho |
@@ -574,13 +602,121 @@ Cada modelo se entrena **tres veces**: solo con variables de operacion, solo con
 
 ---
 
+## Aprendizaje no supervisado sobre el problema de retrasos
+
+El clustering de aeropuertos del baseline responde una pregunta distinta (como se parecen entre si los aeropuertos de Chile). Aqui el objetivo es descubrir estructura **dentro del problema de negocio**, y se ataca por dos vias que responden preguntas diferentes.
+
+### Como se elige k, y por que no basta el silhouette
+
+En ambos casos se recorre k = 2 a 8 y se elige por silhouette, **pero con una condicion de tamano: ningun grupo puede quedar bajo el 2% del total.**
+
+![Seleccion de k](images/rt_05_seleccion_k_vuelos.png)
+
+**¿Para que sirve?** El silhouette por si solo premia particiones que aislan un puñado de casos raros en un grupo propio: matematicamente compactas, inutiles para decidir.
+
+**¿Que descubrimos?** En la segmentacion de vuelos el maximo silhouette esta en **k=6 (0.310)**, pero su grupo mas chico contiene solo el **1.6%** de los slots — un cluster de 4 vuelos sobre el que nadie va a tomar una decision. La regla lo descarta y elige **k=5 (0.302)**, donde el grupo mas chico ya reune el 6.7%. Las barras grises del grafico son los k rechazados por esa razon.
+
+---
+
+### Via 1 — ¿Que vuelos concentran el riesgo?
+
+Se agrupan los **253 slots de vuelo** (aerolinea + numero + tipo de operacion, con al menos 30 operaciones) por su comportamiento historico: hora programada, tasa de retraso, variabilidad, porcentaje de retrasos severos y volumen.
+
+> **Esta segmentacion es descriptiva, no predictiva.** Incluye la puntualidad entre las variables de agrupacion a proposito. Por eso decir "los grupos difieren en puntualidad" seria circular — lo que aporta valor es **cuales** vuelos caen en el grupo critico y **que tan concentrado** esta el riesgo.
+
+![Segmentos de vuelo](images/rt_06_segmentos_vuelos.png)
+
+**¿Para que sirve?** Darle al jefe de operaciones una lista corta y accionable en vez de una tasa promedio que no le dice donde intervenir.
+
+**¿Que descubrimos?** Cinco perfiles de vuelo bien separados (el plano principal retiene el **70.7%** de la varianza):
+
+| Segmento | Slots | Vuelos | Hora tipica | Tasa de retraso | Variabilidad | Severos | Lectura |
+|---|---|---|---|---|---|---|---|
+| **3 — Criticos** | **17** | 3 904 | 15:10 | **25.7%** | **±33 min** | **11.8%** | Erraticos y con retrasos largos |
+| 1 — Matinales irregulares | 62 | 5 815 | 12:19 | 17.6% | ±14 min | 6.6% | Volumen medio, algo inestables |
+| 2 — Vespertinos | 42 | 3 731 | 18:28 | 16.5% | ±15 min | 2.9% | Tarde, pero sin retrasos largos |
+| 4 — Troncales | 63 | **49 148** | 14:39 | 14.3% | ±12 min | 3.5% | El grueso del trafico, en la media |
+| **0 — Puntuales** | 69 | 6 505 | 12:16 | **10.0%** | **±9 min** | 2.0% | El benchmark de la operacion |
+
+**El hallazgo accionable: 17 slots — el 6.7% de los vuelos programados, apenas el 5.6% de las operaciones — tienen una tasa de retraso de 25.7%, mas del doble que el segmento puntual.** No hace falta intervenir todo El Tepual: hace falta intervenir 17 vuelos.
+
+Y el contraste entre los segmentos 0 y 3 senala donde esta el problema: **no es la hora** (12:16 contra 15:10, ambos en horario normal) sino la **variabilidad**, que pasa de ±9 a ±33 minutos. El segmento critico no es tardio de forma sistematica: es impredecible.
+
+> **Advertencia obligatoria antes de usar esta tabla.** 13 de los 17 slots criticos son de una misma aerolinea. Eso **no** significa que sea la menos puntual: el target mide desviacion respecto del horario *habitual de cada vuelo*, asi que penaliza la irregularidad y no el atraso cronico (ver [Etica, sesgos y privacidad](#etica-sesgos-y-privacidad), sesgo *c*). Una aerolinea que siempre sale 20 minutos tarde aparece como puntual. **Esta segmentacion sirve para priorizar donde poner buffer operativo, no para comparar aerolineas entre si.**
+
+---
+
+### Via 2 — ¿Existe un arquetipo de dia malo?
+
+Aqui la pregunta es distinta y el diseño tambien: los **2 019 dias** se agrupan **solo por sus condiciones** — carga operativa, numero de aerolineas, lluvia, viento cruzado, velocidad del viento, temperatura, amplitud termica y presion. La puntualidad **no entra al clustering**; se usa despues, unicamente para etiquetar los grupos ya formados.
+
+> Eso convierte esta via en una **prueba legitima e independiente**. Si las condiciones de operacion contuvieran informacion sobre el retraso, los grupos formados solo con ellas deberian separarse tambien en puntualidad. Es un test del mismo hallazgo del modelo supervisado, por un camino que no usa etiquetas.
+
+![Segmentos de dias](images/rt_07_segmentos_dias.png)
+
+**¿Para que sirve?** Verificar el resultado central del proyecto sin usar un modelo supervisado, para descartar que sea un artefacto de como entrenamos.
+
+**¿Que descubrimos?** El algoritmo separa limpiamente los dos arquetipos meteorologicos que uno esperaria en Puerto Montt:
+
+| Tipo de dia | Dias | Lluvia media | Viento cruzado | Operaciones/dia | Tasa de retraso |
+|---|---|---|---|---|---|
+| **0 — Seco y calmo** | 1 484 | 0.6 mm | 4.9 km/h | 35.6 | **15.0%** |
+| **1 — Lluvioso y ventoso** | 535 | **7.9 mm** | **9.0 km/h** | 33.8 | **16.4%** |
+
+**El dia lluvioso y ventoso existe, esta perfectamente identificado... y se retrasa solo 1.4 puntos mas que el dia seco y calmo.**
+
+El tercer panel cierra la puerta a la objecion obvia — "eligieron un k que les convenia": la brecha entre el mejor y el peor tipo de dia se midio para **todos** los k entre 2 y 8, y **nunca supera 4.7 puntos**. Para que agrupar los dias por condiciones fuera operativamente util, esa brecha tendria que rondar los 10 puntos.
+
+**Las dos vias, supervisada y no supervisada, llegan al mismo lugar por caminos independientes.** El clima define con claridad como es un dia en El Tepual; no define si ese dia se va a retrasar.
+
+---
+
+## Interpretacion del desempeño — que significa cada numero
+
+Un AUC no es una recomendacion. Esta seccion traduce cada metrica a la decision que habilita — o que impide.
+
+| Metrica | Valor | Que significa tecnicamente | Que significa para el negocio |
+|---|---|---|---|
+| **ROC-AUC** | 0.524 | Ante un vuelo retrasado y uno puntual tomados al azar, el modelo ordena bien el par el 52.4% de las veces | Casi una moneda. **No habilita ninguna decision** que dependa de distinguir un vuelo de otro |
+| **Average Precision** | 0.155 | Precision media a lo largo de todos los umbrales, contra una tasa base de 0.138 | Si el modelo avisa de 100 vuelos, ~15 se retrasaran; sin modelo, avisando al azar, ~14. **Un vuelo de diferencia** |
+| **Lift** | 1.12 | El modelo es un 12% mejor que adivinar segun la tasa base | El umbral de despliegue era 1.50. **Queda muy lejos** |
+| **Brier score** | 0.119 | Error cuadratico medio de las probabilidades | El modelo **no miente sobre su incertidumbre**: cuando dice 15%, ocurre el 15%. Es honesto, y eso es lo unico que salva |
+| **Rango del score** | 13.5% – 19% | Todas las predicciones caben en 5.5 puntos | **Es el numero mas revelador.** El modelo le asigna practicamente el mismo riesgo a todos los vuelos porque no encontro nada que los distinga |
+
+### La diferencia entre ROC y Precision-Recall, y por que importa aqui
+
+Con solo un 13.8% de positivos, **la curva ROC hace ver al modelo mejor de lo que es**: premia acertar en la clase mayoritaria, que es la facil. La curva Precision-Recall compara contra la tasa base, y ahi se ve que la curva del modelo se pega a la linea de referencia casi en todo su recorrido. Por eso se reportan ambas y la decision se toma con la segunda.
+
+### El contraste que prueba que la metodologia funciona
+
+La objecion mas razonable a este proyecto es: *"¿el modelo falla, o fallaron ustedes construyendolo?"*. La respuesta esta en comparar los dos modelos supervisados del proyecto, construidos con **la misma arquitectura, el mismo equipo y el mismo pipeline**:
+
+| Modelo | Target | ROC-AUC | Veredicto |
+|---|---|---|---|
+| RandomForest (baseline) | ¿Es internacional este vuelo? | **0.964** | Listo para produccion |
+| GradientBoosting (PoC) | ¿Se retrasara este vuelo? | **0.524** | No se despliega |
+
+**Mismo metodo, resultados opuestos.** Cuando la señal existe en los datos, este pipeline la encuentra y la explota hasta un AUC de 0.964. Cuando no existe, lo reporta. La diferencia entre 0.964 y 0.524 **es una propiedad de los datos, no de como se modelo.**
+
+### De las metricas a las recomendaciones
+
+| Hallazgo | Recomendacion operativa | Respaldo |
+|---|---|---|
+| El clima no predice el retraso | **No construir un sistema predictivo climatico.** Ahorra el costo de desarrollo y mantencion de un modelo que no decide nada | AUC 0.524; el clima solo resta 0.015 |
+| El viento cruzado > 30 km/h duplica el retraso, pero ocurre en el 0.25% de los vuelos | **Una alerta por umbral, no un modelo.** Cuando el pronostico supere 30 km/h de componente cruzada, activar contingencia | 26.0% vs 14.7% de tasa base |
+| 17 slots concentran el riesgo | **Poner el buffer operativo ahi.** Es el 5.6% de las operaciones con el doble de retraso | Segmentacion de vuelos, segmento 3 |
+| El problema es variabilidad, no atraso cronico | **Medir y gestionar la consistencia**, no solo el promedio. El segmento puntual y el critico difieren en ±9 vs ±33 min | Segmentos 0 y 3 |
+| El retraso se acumula durante el dia | **Proteger la primera ola.** Un atraso a las 06:00 se paga toda la jornada | 10.8% a las 06:00 → 18.7% a las 22:00 |
+
+---
+
 ## Ventana de Confianza — 7 a 14 dias
 
 Aunque el modelo actual no discrimina lo suficiente, la regla de negocio queda definida y vigente para cuando si lo haga. **El Score de Riesgo solo es confiable en una ventana tactica de 7 a 14 dias hacia el futuro.** Mas alla de ese horizonte el margen de error supone riesgos inaceptables para una decision gerencial.
 
 Las razones son tres:
 
-1. **Concept drift.** Los patrones operativos cambian: itinerarios nuevos, flotas distintas, huelgas, cambios regulatorios. El modelo entrenado con 2020–2023 ya perdio precision en 2025 (AUC de validacion 0.545 contra 0.534 en prueba). Un modelo entrenado sobre el pasado envejece.
+1. **Concept drift.** Los patrones operativos cambian: itinerarios nuevos, flotas distintas, huelgas, cambios regulatorios. El modelo entrenado con 2020–2023 ya perdio precision en 2025 (AUC de validacion 0.569 contra 0.524 en prueba). Un modelo entrenado sobre el pasado envejece.
 2. **El pronostico meteorologico se degrada.** Mas alla de ~10 dias, un pronostico de clima no es mejor que la climatologia historica. Alimentar el modelo con un pronostico a 30 dias es alimentarlo con ruido.
 3. **El itinerario todavia no es firme.** Mas alla de dos semanas, las aerolineas aun ajustan horarios, y el horario programado es justamente la variable mas predictiva del modelo.
 
@@ -638,7 +774,7 @@ Las grandes entran casi completas; los operadores pequeños pierden hasta **1 de
 
 | Riesgo | Por que importa | Mitigacion adoptada |
 |---|---|---|
-| **Uso punitivo contra trabajadores** | Un "Score de Riesgo" por vuelo podria usarse para evaluar tripulaciones o penalizar turnos. Con AUC 0.534, cualquier decision laboral basada en el seria practicamente azar con apariencia de objetividad | Se documenta explicitamente que el modelo **no discrimina** lo suficiente; el README desaconseja su despliegue |
+| **Uso punitivo contra trabajadores** | Un "Score de Riesgo" por vuelo podria usarse para evaluar tripulaciones o penalizar turnos. Con AUC 0.524, cualquier decision laboral basada en el seria practicamente azar con apariencia de objetividad | Se documenta explicitamente que el modelo **no discrimina** lo suficiente; el README desaconseja su despliegue |
 | **Sesgo de automatizacion** | Un numero de 0 a 100% proyecta una precision que el modelo no tiene. La gente confia mas en un porcentaje que en una opinion | El grafico de calibracion muestra que **todos los scores caben entre 13.5% y 19%** — la falta de poder discriminante queda a la vista, no escondida en una metrica |
 | **Discriminacion contra operadores pequeños** | Ver sesgo (a) | Se cuantifica la brecha de inclusion por aerolinea; se recomienda no usar el score para asignar recursos entre operadores |
 | **Uso dual / vigilancia** | Los datos de movimiento de aeronaves sirven para seguir personas | Filtro a aviacion comercial regular; matricula excluida de las features |
@@ -715,7 +851,7 @@ OperacionesAeronaves/
 ├── images/              ← graficos EDA y ML generados automaticamente
 │   ├── eda_*.png        ← analisis exploratorio (baseline)
 │   ├── ml_*.png         ← clustering y clasificacion (baseline)
-│   └── rt_*.png         ← PoC de retrasos
+│   └── rt_*.png         ← PoC de retrasos (clima, modelos y segmentacion)
 │
 ├── notebooks/
 │   └── informe_ml_operaciones.ipynb   ← informe ejecutable, recorre CRISP-DM
@@ -724,14 +860,16 @@ OperacionesAeronaves/
 │   └── descargar_clima_scte.py   ← descarga el clima desde Meteostat
 │
 ├── src/operaciones_aeronaves/pipelines/
-│   ├── data_inventory/  ← escaneo de archivos raw
+│   ├── data_inventory/  ← escaneo y perfilado de archivos raw
 │   ├── data_processing/ ← limpieza, JOIN y EDA basico
 │   ├── ml/              ← EDA avanzado, clustering y clasificacion
-│   └── retrasos_ml/     ← PoC de riesgo de retraso con clima
+│   └── retrasos_ml/     ← PoC de retrasos
+│       ├── nodes.py         ← target, clima y modelos supervisados
+│       └── segmentacion.py  ← aprendizaje no supervisado
 │
 ├── tests/
 │   ├── test_run.py                  ← humo: los 4 pipelines se registran
-│   └── pipelines/retrasos_ml/       ← 16 tests de la reconstruccion horaria
+│   └── pipelines/retrasos_ml/       ← 22 tests: horario, clima y seleccion de k
 │
 ├── conf/base/
 │   ├── catalog.yml      ← registro de todos los datasets

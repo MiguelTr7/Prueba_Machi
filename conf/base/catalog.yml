@@ -121,6 +121,10 @@ metricas_retrasos:
   type: pandas.ParquetDataset
   filepath: data/02_intermediate/metricas_retrasos.parquet
 
+busqueda_hiperparametros:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/busqueda_hiperparametros.parquet
+
 efecto_clima_retraso:
   type: pandas.ParquetDataset
   filepath: data/02_intermediate/efecto_clima_retraso.parquet
@@ -134,4 +138,24 @@ vuelos_clima:
 modelo_retrasos:
   type: pickle.PickleDataset
   filepath: data/06_models/modelo_retrasos.pkl
+  backend: joblib
+
+# --- retrasos_ml: aprendizaje no supervisado ----------------------------------
+# Segmentacion de vuelos (descriptiva) y de dias (por condiciones).
+
+perfil_vuelos:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/perfil_vuelos.parquet
+
+segmentos_vuelos:
+  type: pandas.ParquetDataset
+  filepath: data/04_feature/segmentos_vuelos.parquet
+
+segmentos_dias:
+  type: pandas.ParquetDataset
+  filepath: data/04_feature/segmentos_dias.parquet
+
+modelo_segmentacion:
+  type: pickle.PickleDataset
+  filepath: data/06_models/modelo_segmentacion.pkl
   backend: joblib

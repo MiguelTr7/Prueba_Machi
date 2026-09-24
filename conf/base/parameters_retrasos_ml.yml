@@ -45,3 +45,13 @@ retrasos_ml:
 
   # Regresion logistica regularizada: el competidor simple y calibrado.
   logreg_C: 0.1
+
+  # --- Aprendizaje no supervisado -------------------------------------------
+  # Un slot con pocas operaciones no tiene comportamiento estable que describir.
+  min_ops_slot: 30
+  min_ops_dia: 10
+  k_min: 2
+  k_max: 8
+  # Ningun cluster puede quedar bajo el 2% del total: sin esta regla el
+  # silhouette premia particiones que aislan un puñado de casos raros.
+  min_pct_cluster: 0.02

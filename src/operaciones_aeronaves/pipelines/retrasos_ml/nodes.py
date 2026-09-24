@@ -41,6 +41,7 @@ from sklearn.metrics import (
     f1_score,
     precision_score,
     recall_score,
+    precision_recall_curve,
     roc_auc_score,
     roc_curve,
 )
@@ -286,32 +287,55 @@ def _matriz_features(df: pd.DataFrame) -> pd.DataFrame:
     return X[_FEATURES_CLIMA + _FEATURES_OPERA]
 
 
-def _candidatos(params: dict) -> dict:
-    """Los dos modelos que compiten por ser el Score de Riesgo.
+def _grilla(params: dict) -> dict[str, list[dict]]:
+    """Configuraciones candidatas de cada algoritmo.
 
-    Gradient boosting es lo que pedia el plan original, pero con una senal tan
-    debil sobreajusta sin remedio (AUC 0.84 en train contra 0.49 en test), asi
-    que compite fuertemente regularizado y contra una regresion logistica, que
-    ademas entrega probabilidades calibradas de fabrica — justo lo que necesita
-    un score que se lee como porcentaje.
+    **Por que estos dos algoritmos.** El problema es una clasificacion binaria
+    desbalanceada (15% de positivos) con variables mixtas: gradient boosting
+    captura interacciones no lineales entre hora, aerolinea y clima sin pedir
+    escalado ni codificacion previa, y es el estandar para datos tabulares.
+    La regresion logistica entra como contraparte deliberadamente simple: si un
+    modelo lineal iguala al boosting, es señal de que no hay estructura no
+    lineal que aprender — y eso es exactamente lo que termino ocurriendo.
+    Ademas entrega probabilidades calibradas de fabrica, que es lo que necesita
+    un score leido como porcentaje.
+
+    **Por que la grilla es chica y sesgada a la regularizacion.** Con una señal
+    debil, el boosting sin podar memoriza: llega a AUC 0.84 en entrenamiento y
+    0.49 en prueba. La grilla recorre desde configuraciones flexibles hasta muy
+    restringidas para que la eleccion del punto sea del dato, no nuestra.
     """
+    semilla = params["random_state"]
     return {
-        "GradientBoosting (regularizado)": HistGradientBoostingClassifier(
-            max_iter=params["max_iter"],
-            learning_rate=params["learning_rate"],
-            max_depth=params["max_depth"],
-            min_samples_leaf=params["min_samples_leaf"],
-            l2_regularization=params["l2_regularization"],
-            random_state=params["random_state"],
-            early_stopping=False,
-        ),
-        "RegresionLogistica": make_pipeline(
-            SimpleImputer(strategy="median"),
-            StandardScaler(),
-            LogisticRegression(max_iter=1000, C=params["logreg_C"],
-                               random_state=params["random_state"]),
-        ),
+        "GradientBoosting": [
+            {"max_iter": it, "learning_rate": lr, "max_depth": prof,
+             "min_samples_leaf": hojas, "l2_regularization": l2,
+             "random_state": semilla, "early_stopping": False}
+            for it, lr, prof, hojas, l2 in [
+                (300, 0.06, 6, 20, 0.0),     # flexible: el punto de partida tipico
+                (150, 0.05, 4, 50, 1.0),
+                (100, 0.05, 3, 100, 1.0),
+                (60, 0.05, 2, 200, 1.0),
+                (40, 0.03, 2, 500, 5.0),
+                (25, 0.05, 2, 1000, 10.0),   # casi un modelo aditivo
+            ]
+        ],
+        "RegresionLogistica": [
+            {"C": c, "max_iter": 1000, "random_state": semilla}
+            for c in (1.0, 0.1, 0.01, 0.001)
+        ],
     }
+
+
+def _construir(algoritmo: str, config: dict):
+    """Instancia un estimador a partir de su configuracion."""
+    if algoritmo == "GradientBoosting":
+        return HistGradientBoostingClassifier(**config)
+    return make_pipeline(
+        SimpleImputer(strategy="median"),
+        StandardScaler(),
+        LogisticRegression(**config),
+    )
 
 
 def _metricas_test(nombre: str, conjunto: str, y_test, proba) -> dict:
@@ -347,7 +371,7 @@ def train_modelo_retrasos(vuelos_clima: pd.DataFrame, params: dict) -> tuple:
     ambos — porque esa comparacion *es* la respuesta a la pregunta del proyecto:
     si sumar el clima no mueve el AUC, el clima no explica el retraso.
 
-    Devuelve (tabla de metricas, dict con el modelo ganador y sus metadatos).
+    Devuelve (metricas por modelo, tabla de la busqueda, artefacto del ganador).
     """
     df = vuelos_clima.dropna(subset=["tavg"]).copy()
 
@@ -369,20 +393,51 @@ def train_modelo_retrasos(vuelos_clima: pd.DataFrame, params: dict) -> tuple:
         "clima + operacion": _FEATURES_CLIMA + _FEATURES_OPERA,
     }
 
-    filas, ajustados = [], {}
+    # Busqueda de hiperparametros: cada configuracion se ajusta con el tramo de
+    # entrenamiento y se puntua contra el año de validacion. El tramo de prueba
+    # no participa en ninguna decision.
+    filas, ajustados, busqueda = [], {}, []
     for conjunto, columnas in conjuntos.items():
         Xc = X[columnas]
-        for nombre, modelo in _candidatos(params).items():
-            modelo.fit(Xc[es_train], y[es_train])
-            auc_val = roc_auc_score(y[es_val], modelo.predict_proba(Xc[es_val])[:, 1])
+        for algoritmo, configuraciones in _grilla(params).items():
+            mejor = None
+            for config in configuraciones:
+                modelo = _construir(algoritmo, config)
+                modelo.fit(Xc[es_train], y[es_train])
+                auc_val = roc_auc_score(y[es_val], modelo.predict_proba(Xc[es_val])[:, 1])
+                auc_train = roc_auc_score(y[es_train], modelo.predict_proba(Xc[es_train])[:, 1])
+
+                busqueda.append({
+                    "features": conjunto,
+                    "algoritmo": algoritmo,
+                    "config": ", ".join(
+                        f"{k}={v}" for k, v in config.items() if k != "random_state"
+                    ),
+                    "roc_auc_train": round(auc_train, 4),
+                    "roc_auc_val": round(auc_val, 4),
+                    # La brecha train-val delata la memorizacion.
+                    "brecha_sobreajuste": round(auc_train - auc_val, 4),
+                })
+                if mejor is None or auc_val > mejor[1]:
+                    mejor = (modelo, auc_val, auc_train, config)
+
+            modelo, auc_val, auc_train, config = mejor
             proba_test = modelo.predict_proba(Xc[es_test])[:, 1]
 
-            fila = _metricas_test(nombre, conjunto, y[es_test], proba_test)
+            fila = _metricas_test(algoritmo, conjunto, y[es_test], proba_test)
             fila["roc_auc_val"] = round(auc_val, 4)
-            fila["roc_auc_train"] = round(
-                roc_auc_score(y[es_train], modelo.predict_proba(Xc[es_train])[:, 1]), 4)
+            fila["roc_auc_train"] = round(auc_train, 4)
+            fila["config"] = ", ".join(f"{k}={v}" for k, v in config.items() if k != "random_state")
             filas.append(fila)
-            ajustados[(conjunto, nombre)] = (modelo, columnas, proba_test)
+            ajustados[(conjunto, algoritmo)] = (modelo, columnas, proba_test)
+
+    busqueda = pd.DataFrame(busqueda)
+    logger.info("Busqueda de hiperparametros: %d configuraciones evaluadas", len(busqueda))
+    peor = busqueda.loc[busqueda.brecha_sobreajuste.idxmax()]
+    logger.info(
+        "Mayor sobreajuste observado: %s (%s) — AUC train %.4f vs val %.4f",
+        peor.algoritmo, peor.config, peor.roc_auc_train, peor.roc_auc_val,
+    )
 
     metricas = pd.DataFrame(filas)
 
@@ -422,6 +477,7 @@ def train_modelo_retrasos(vuelos_clima: pd.DataFrame, params: dict) -> tuple:
     artefacto = {
         "modelo": modelo,
         "nombre_modelo": ganador.modelo,
+        "busqueda_hiperparametros": busqueda,
         "conjunto_features": ganador.features,
         "features": columnas,
         "features_clima": _FEATURES_CLIMA,
@@ -432,7 +488,7 @@ def train_modelo_retrasos(vuelos_clima: pd.DataFrame, params: dict) -> tuple:
         "anio_corte_test": corte,
         "umbral_retraso_min": params["umbral_retraso_min"],
     }
-    return metricas, artefacto
+    return metricas, busqueda, artefacto
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -443,6 +499,59 @@ _CORTES_LLUVIA = [-0.1, 0, 1, 5, 15, 1000]
 _ETIQ_LLUVIA = ["Sin lluvia", "0-1 mm", "1-5 mm", "5-15 mm", "> 15 mm"]
 _CORTES_VIENTO = [-0.1, 5, 10, 20, 30, 100]
 _ETIQ_VIENTO = ["< 5", "5-10", "10-20", "20-30", "> 30"]
+
+
+def _grafico_busqueda(busqueda: pd.DataFrame) -> None:
+    """Muestra como la regularizacion cierra la brecha entre train y validacion.
+
+    Es la evidencia que justifica la configuracion elegida: la version flexible
+    del boosting alcanza un AUC altisimo en entrenamiento y no lo sostiene en
+    validacion. Esa brecha es memorizacion, no aprendizaje.
+    """
+    gb = busqueda[
+        (busqueda.algoritmo == "GradientBoosting")
+        & (busqueda.features == "clima + operacion")
+    ].reset_index(drop=True)
+    if gb.empty:
+        return
+
+    def _valor(config: str, clave: str) -> str:
+        """Extrae 'clave=valor' de la cadena de configuracion."""
+        return config.split(f"{clave}=")[1].split(",")[0]
+
+    # Las configuraciones ya vienen de mas flexible a mas restringida.
+    etiquetas = [
+        "prof={}\nhojas={}".format(_valor(c, "max_depth"), _valor(c, "min_samples_leaf"))
+        for c in gb.config
+    ]
+    x = np.arange(len(gb))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+    ax1.plot(x, gb.roc_auc_train, marker="o", linewidth=2, color=_COLOR_B, label="Entrenamiento")
+    ax1.plot(x, gb.roc_auc_val, marker="o", linewidth=2, color=_COLOR_A, label="Validacion (2024)")
+    ax1.fill_between(x, gb.roc_auc_val, gb.roc_auc_train, alpha=0.12, color=_COLOR_B)
+    ax1.axhline(0.5, color="grey", linestyle=":", linewidth=1, label="Azar")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(etiquetas, fontsize=8)
+    ax1.set_xlabel("← mas flexible          Configuracion          mas regularizado →")
+    ax1.set_ylabel("ROC-AUC")
+    ax1.set_title("El area sombreada es memorizacion, no aprendizaje")
+    ax1.legend(fontsize=9)
+
+    ax2.bar(x, gb.brecha_sobreajuste, color=_COLOR_B, alpha=0.85)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(etiquetas, fontsize=8)
+    ax2.set_xlabel("← mas flexible          Configuracion          mas regularizado →")
+    ax2.set_ylabel("AUC entrenamiento − AUC validacion")
+    ax2.set_title("Brecha de sobreajuste por configuracion")
+
+    fig.suptitle("Por que el modelo final esta fuertemente regularizado", fontsize=13)
+    fig.tight_layout()
+    ruta = _IMAGES_DIR / "rt_08_busqueda_hiperparametros.png"
+    fig.savefig(ruta, dpi=120)
+    plt.close(fig)
+    logger.info("Guardado %s", ruta)
 
 
 def evaluar_impacto_clima(vuelos_clima: pd.DataFrame, artefacto: dict) -> pd.DataFrame:
@@ -528,9 +637,10 @@ def evaluar_impacto_clima(vuelos_clima: pd.DataFrame, artefacto: dict) -> pd.Dat
     plt.close(fig)
     logger.info("Guardado %s", ruta)
 
-    # ── 4. ROC + calibracion del score ───────────────────────────────────────
+    # ── 4. ROC + Precision-Recall + calibracion ──────────────────────────────
     y_test, proba = artefacto["y_test"], artefacto["proba_test"]
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.5))
+    tasa_base_test = float(np.mean(y_test))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(17, 5))
 
     fpr, tpr, _ = roc_curve(y_test, proba)
     auc = roc_auc_score(y_test, proba)
@@ -539,27 +649,43 @@ def evaluar_impacto_clima(vuelos_clima: pd.DataFrame, artefacto: dict) -> pd.Dat
     ax1.fill_between(fpr, tpr, alpha=0.08, color=_COLOR_A)
     ax1.set_xlabel("Falsos positivos")
     ax1.set_ylabel("Verdaderos positivos")
-    ax1.set_title(f"Curva ROC — {artefacto['nombre_modelo']}, test {artefacto['anio_corte_test']}+")
+    ax1.set_title(f"Curva ROC — {artefacto['nombre_modelo']}\ntest {artefacto['anio_corte_test']}+")
     ax1.legend(loc="lower right", fontsize=9)
+
+    # Precision-Recall: con solo 14% de positivos, la ROC se ve mejor de lo que
+    # el modelo es. La PR compara contra la tasa base, que es la linea honesta.
+    precision, recall, _ = precision_recall_curve(y_test, proba)
+    ap = average_precision_score(y_test, proba)
+    ax2.plot(recall, precision, color=_COLOR_A, linewidth=2, label=f"Score de Riesgo (AP = {ap:.3f})")
+    ax2.axhline(tasa_base_test, color=_COLOR_B, linestyle="--",
+                label=f"Tasa base ({tasa_base_test:.3f})")
+    ax2.set_xlabel("Recall — % de retrasos detectados")
+    ax2.set_ylabel("Precision — % de aciertos entre los avisados")
+    ax2.set_ylim(0, max(0.5, precision.max() * 1.1))
+    ax2.set_title("Curva Precision-Recall\n(la metrica correcta con clases desbalanceadas)")
+    ax2.legend(fontsize=9)
 
     # Calibracion: el score solo sirve como "probabilidad" si un score de 30%
     # corresponde de verdad a un 30% de vuelos retrasados.
     bins = pd.qcut(proba, 10, duplicates="drop")
     cal = pd.DataFrame({"p": proba, "y": y_test}).groupby(bins, observed=True).mean()
-    ax2.plot(cal["p"], cal["y"], marker="o", linewidth=2, color=_COLOR_A, label="Score observado")
+    ax3.plot(cal["p"], cal["y"], marker="o", linewidth=2, color=_COLOR_A, label="Score observado")
     limite = float(cal["p"].max())
-    ax2.plot([0, limite], [0, limite], linestyle="--", color="grey",
+    ax3.plot([0, limite], [0, limite], linestyle="--", color="grey",
              label="Calibracion perfecta")
-    ax2.set_xlabel("Score de Riesgo predicho")
-    ax2.set_ylabel("Retraso real observado")
-    ax2.set_title("Calibracion del Score de Riesgo")
-    ax2.legend(fontsize=9)
+    ax3.set_xlabel("Score de Riesgo predicho")
+    ax3.set_ylabel("Retraso real observado")
+    ax3.set_title("Calibracion del Score de Riesgo")
+    ax3.legend(fontsize=9)
 
     fig.tight_layout()
     ruta = _IMAGES_DIR / "rt_04_roc_calibracion.png"
     fig.savefig(ruta, dpi=120)
     plt.close(fig)
     logger.info("Guardado %s", ruta)
+
+    # ── 5. La busqueda de hiperparametros, como evidencia ────────────────────
+    _grafico_busqueda(artefacto["busqueda_hiperparametros"])
 
     # ── Tabla de efecto del clima, para citar en el README ───────────────────
     filas = []
