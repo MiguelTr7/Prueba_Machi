@@ -84,7 +84,7 @@ La hipotesis de partida — la que el equipo quiso poner a prueba — es que **e
 
 | # | Objetivo | Estado |
 |---|---|---|
-| O1 | Construir un pipeline reproducible de ingesta, limpieza e integracion de las tres fuentes | ✅ Cumplido — 21 nodos Kedro, 150 s |
+| O1 | Construir un pipeline reproducible de ingesta, limpieza e integracion de las tres fuentes | ✅ Cumplido — 22 nodos Kedro, 207 s |
 | O2 | Derivar una medida de retraso valida a partir de datos que **no** incluyen hora programada | ✅ Cumplido — horario reconstruido por slots |
 | O3 | Cruzar vuelos y clima a nivel diario sin degradar el rendimiento | ✅ Cumplido — 71 606 vuelos, 0 sin clima |
 | O4 | Cuantificar el efecto del clima sobre la tasa de retraso | ✅ Cumplido — el efecto es casi nulo salvo viento cruzado extremo |
@@ -179,7 +179,7 @@ Las tres son **publicas y de acceso abierto**; ninguna requiere credenciales ni 
 
 ## Arquitectura y Pipeline
 
-El proyecto esta construido con **Kedro**, un framework que convierte cada transformacion en un nodo trazable y reproducible. El flujo completo tiene **21 nodos** que corren en ~150 segundos.
+El proyecto esta construido con **Kedro**, un framework que convierte cada transformacion en un nodo trazable y reproducible. El flujo completo tiene **22 nodos** que corren en ~207 segundos.
 
 ```
 vuelos_raw (11M filas)                        clima_diario_scte.csv (2 192 dias)
@@ -209,6 +209,7 @@ construir_target_retraso               │
                     ├──▶ train_modelo_retrasos  ─▶ modelo_retrasos.pkl
                     │                           └─ busqueda de 30 configuraciones
                     ├──▶ evaluar_impacto_clima  ─▶ graficos + tabla de efecto
+                    ├──▶ analisis_exploratorio  ─▶ 08_reporting/eda_report.md
                     │
                     │   ── no supervisado ──
                     ├──▶ perfilar_vuelos ── segmentar_vuelos ─▶ modelo_segmentacion.pkl
@@ -222,7 +223,7 @@ construir_target_retraso               │
 | `data_inventory` | Inventario de archivos en `data/01_raw/` |
 | `data_processing` | Limpieza, JOIN y EDA basico |
 | `ml` | EDA avanzado, clustering y clasificacion (baseline) |
-| `retrasos_ml` | PoC de retrasos: modelos supervisados, segmentacion no supervisada y evaluacion |
+| `retrasos_ml` | PoC de retrasos: EDA completo, modelos supervisados, segmentacion no supervisada y evaluacion |
 
 El baseline **no fue modificado**. `retrasos_ml` es un pipeline aparte que parte de la misma fuente cruda.
 
@@ -239,19 +240,19 @@ uv sync
 # Descargar las tres fuentes a data/01_raw/ (un solo comando, ~25 s)
 python scripts/descargar_datos.py
 
-# Ejecutar todo (~150 segundos)
+# Ejecutar todo (~207 segundos)
 uv run kedro run
 
 # O por partes
 uv run kedro run --pipeline=data_processing
 uv run kedro run --pipeline=ml
-uv run kedro run --pipeline=retrasos_ml   # ~30 segundos
+uv run kedro run --pipeline=retrasos_ml   # ~94 segundos
 
 # Pruebas (26 tests)
 uv run pytest
 ```
 
-**Informe ejecutable.** El notebook [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) recorre el proyecto completo siguiendo las seis fases de CRISP-DM, llamando a **las mismas funciones** que ejecuta el pipeline — no duplica logica. Corre en ~1 minuto:
+**Informe ejecutable.** El notebook [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) recorre el proyecto completo siguiendo las seis fases de CRISP-DM, llamando a **las mismas funciones** que ejecuta el pipeline — no duplica logica. Corre en ~3 minutos:
 
 ```bash
 uv run jupyter lab notebooks/informe_ml_operaciones.ipynb
@@ -307,6 +308,34 @@ Resultado: **99.996% de cobertura** — solo 400 filas de 11 millones quedaron s
 
 ---
 
+### ¿Como evoluciono el trafico en el tiempo?
+
+![Operaciones por año](images/eda_04_operaciones_anio.png)
+
+**¿Para que sirve?** Situar el periodo de la PoC (2020-2026) dentro de la serie historica completa, para saber si es un tramo representativo.
+
+**¿Que descubrimos?** La pandemia parte la serie en dos: **el trafico cae un 44% entre 2019 y 2020** (de 528 890 a 298 358 vuelos) y no recupera el nivel previo hasta 2023. En 2024 lo supera (575 395 vuelos, un 109% de 2019). Esto es lo que justifica tratar 2020-2021 como un regimen operativo aparte, y es la razon del sesgo COVID que se documenta mas adelante.
+
+![Internacional vs domestico](images/eda_02_intl_vs_dom.png)
+
+**¿Para que sirve?** Ver si la composicion del trafico —no solo su volumen— cambio con la crisis.
+
+**¿Que descubrimos?** El trafico internacional se hundio mas y se recupero mas lento: del **14.0% de los vuelos en 2019 baja al 7.2% en 2021** y recien vuelve al 14.5% en 2025. Las fronteras cerraron antes y abrieron despues que los vuelos domesticos, y el dato lo refleja con nitidez.
+
+### ¿Que aeropuertos concentran que tipo de operacion?
+
+![PMD vs internacional por aeropuerto](images/eda_05_pmd_vs_intl_aeropuerto.png)
+
+**¿Para que sirve?** Cruzar en un solo grafico el peso tipico de las aeronaves con el porcentaje de vuelos internacionales de cada aeropuerto.
+
+**¿Que descubrimos?** **SCEL esta solo en su esquina**: es el unico punto que combina aeronaves pesadas con un alto porcentaje internacional. El resto se reparte entre aeropuertos de aviacion liviana casi sin vuelos internacionales y un grupo intermedio de aeronaves pesadas pero trafico nacional —los aeropuertos de carga y de larga distancia domestica, donde esta El Tepual. Es la misma estructura que despues encuentra el clustering, pero vista a ojo.
+
+![Heatmap Top 12](images/eda_06_heatmap_top12.png)
+
+**¿Para que sirve?** Ver la evolucion de cada aeropuerto grande por separado, en vez del agregado nacional.
+
+**¿Que descubrimos?** SCEL concentra el **28.2%** de todas las operaciones del pais, seguido de Tobalaba (SCTB) con 1.3 millones. La caida de 2020 es visible como una banda clara que cruza todas las filas —afecto a todos— pero **no con la misma intensidad**: los aeropuertos de aviacion general se recuperaron antes que los de transporte comercial.
+
 ### ¿Que variables se relacionan entre si?
 
 ![Correlacion variables numericas](images/eda_07_correlacion_numericas.png)
@@ -320,8 +349,6 @@ Lo mas util, sin embargo, es lo que **no** aparece. El flag `pmd_fue_imputado` t
 `mes_id` no se correlaciona con nada (r ≤ 0.14 con todo), lo que descarta una tendencia temporal fuerte en el peso de las aeronaves.
 
 > **Correccion respecto de una version anterior de este README.** Aqui se afirmaban r = 0.31 para PMD vs internacional y −0.24 para el flag vs PMD. Ambas cifras eran incorrectas y la segunda sostenia una conclusion falsa — que los faltantes se concentraban en aeronaves livianas. Los valores correctos son los de la matriz: **0.56 y −0.003**. Se deja constancia porque la conclusion cambia: los faltantes **no** tienen patron.
-
----
 
 ---
 
@@ -364,6 +391,12 @@ El tercero era un error nuestro: la primera version imputaba solo los `NaN`, asi
 Agrupamos los 69 aeropuertos usando **K-Means** sobre cinco variables: volumen de vuelos, porcentaje internacional, PMD mediano, numero de aerolineas y promedio de operaciones mensuales (todo transformado con logaritmo para manejar la escala).
 
 Probamos k=2 hasta k=8. El optimo matematico es **k=4** — mayor Silhouette Score (0.420) y punto de inflexion en la curva del codo.
+
+![Seleccion de k para aeropuertos](images/ml_04_elbow_silhouette.png)
+
+**¿Para que sirve?** Justificar el numero de grupos en vez de elegirlo a ojo. La curva del codo muestra donde dejan de ganarse compacidad, y el silhouette mide que tan bien separados quedan.
+
+**¿Que descubrimos?** Ambos criterios coinciden en k=4, lo que da confianza: el codo se quiebra ahi y el silhouette alcanza su maximo (0.420). No siempre pasa — cuando no coinciden hay que decidir con criterio de negocio.
 
 ![Clusters aeropuertos](images/ml_01_clusters_aeropuertos.png)
 
@@ -408,6 +441,14 @@ Probamos k=2 hasta k=8. El optimo matematico es **k=4** — mayor Silhouette Sco
 **¿Para que sirve?** Medir la capacidad del modelo para separar vuelos internacionales de domesticos en cualquier umbral de decision.
 
 **¿Que descubrimos?** Un **ROC-AUC de 0.964** significa que el modelo clasifica correctamente el 96.4% de los pares vuelo-internacional vs. vuelo-domestico. La validacion cruzada de 5 particiones confirma que este resultado es estable (0.963 ± 0.001) — no es suerte de una sola particion.
+
+### ¿Donde se equivoca?
+
+![Matriz de confusion](images/ml_03_confusion_matrix.png)
+
+**¿Para que sirve?** Ver el tipo de error, no solo cuanto error hay. Un modelo con la misma exactitud puede fallar de maneras muy distintas.
+
+**¿Que descubrimos?** Casi todo el error esta en un solo cuadrante: vuelos domesticos clasificados como internacionales. Es el precio deliberado de priorizar el recall — el modelo prefiere marcar de mas antes que dejar pasar un vuelo internacional sin gate. La columna de falsos negativos es minima, que es justo lo que se buscaba.
 
 ### Metricas del modelo
 
@@ -587,7 +628,9 @@ Se evaluaron **30 configuraciones** — 6 del boosting y 4 de la logistica, por 
 
 **¿Para que sirve?** Mostrar que la regularizacion agresiva del modelo final es una conclusion del dato, no una decision arbitraria.
 
-**¿Que descubrimos?** La version flexible del boosting — la configuracion con la que cualquiera empezaria — alcanza **ROC-AUC 0.845 en entrenamiento y 0.518 en validacion**. Esa brecha de 0.33 es memorizacion pura: el modelo aprende el ruido de 2020-2023 y no le sirve de nada en 2024. A medida que se restringe la profundidad y se exige mas observaciones por hoja, el AUC de entrenamiento cae y el de validacion **sube**. El mejor punto de validacion esta en un arbol de profundidad 4 con brecha de apenas 0.10.
+**¿Que descubrimos?** La version flexible del boosting — la configuracion con la que cualquiera empezaria — alcanza **ROC-AUC 0.845 en entrenamiento y 0.518 en validacion**. Esa brecha de 0.33 es memorizacion pura: el modelo aprende el ruido de 2020-2023 y no le sirve de nada en 2024.
+
+A medida que se restringe la profundidad y se exige mas observaciones por hoja, el AUC de entrenamiento cae **y el de validacion sube**. El optimo esta en el extremo podado: arboles de **profundidad 2** con 200 observaciones minimas por hoja, que logran el mejor AUC de validacion (0.545) con una brecha de apenas **0.059**.
 
 > Este grafico es la respuesta a "¿por que su modelo es tan simple?". Porque cualquier cosa mas compleja memoriza en vez de aprender, y lo podemos demostrar.
 
@@ -608,7 +651,11 @@ Cada modelo se entrena **tres veces**: solo con variables de operacion, solo con
 
 1. **Con solo clima, el modelo queda por debajo del azar** (AUC 0.469 y 0.486, contra 0.5 de una moneda). El clima diario, por si solo, no contiene informacion util sobre si un vuelo se va a retrasar.
 2. **Agregar el clima a las variables de operacion empeora el modelo** (0.533 → 0.518 con el mejor de cada conjunto). No es un error de codigo: es el comportamiento clasico de una variable que aporta ruido en vez de señal, y que el modelo termina usando para memorizar el pasado.
-3. **El mejor modelo llega a AUC 0.533.** Eso es apenas mejor que el azar. El pipeline selecciona automaticamente el ganador por el año de validacion, y **el ganador no usa clima**.
+3. **Ningun modelo pasa de AUC 0.533.** Eso es apenas mejor que el azar. El pipeline selecciona automaticamente el ganador por el año de validacion, y **el ganador no usa clima**.
+
+> **Por que el modelo entregado marca 0.524 y no 0.533.** El mejor resultado en la tabla de prueba lo logra la regresion logistica (0.533), pero el pipeline **no la elige**: selecciona por el año de validacion, donde gana el gradient boosting (0.569 contra 0.540), y ese obtiene 0.524 en prueba.
+>
+> Elegir el 0.533 seria mirar el conjunto de prueba para decidir — exactamente lo que el split de tres tramos existe para impedir. **Que el ganador por validacion no sea el mejor en prueba es informacion, no un error**: con diferencias de esta magnitud entre modelos, el orden entre ellos es ruido. Es una razon mas para no desplegar ninguno.
 
 ![Importancia de variables](images/rt_02_importancia.png)
 
@@ -877,7 +924,7 @@ Ordenado por impacto esperado, no por facilidad:
 
 **1. Conseguir el itinerario real.** Es la mejora con mas potencial y la que resolveria la limitacion de fondo. Con la hora programada oficial (de una API de itinerarios o de los propios sistemas de la aerolinea), el target dejaria de ser una reconstruccion y el retraso seria exacto.
 
-**2. Modelar la propagacion de red.** Los datos muestran que el retraso llega en el avion desde el aeropuerto anterior. Encadenar las operaciones por `matricula` permitiria construir la variable mas prometedora: *¿venia atrasado el avion que opera este vuelo?*
+**2. Modelar la propagacion de red.** El retraso crece a lo largo del dia (10.8% a las 06:00 contra 18.7% a las 22:00), lo que es **consistente** con que se arrastre de una rotacion a la siguiente — pero el proyecto **no lo comprobo**: haria falta encadenar las operaciones por `matricula` para saber si el avion venia atrasado del aeropuerto anterior. Esa es la variable mas prometedora que queda sin explorar, y la hipotesis que primero habria que testear.
 
 **3. Incorporar visibilidad y techo de nubes.** El dataset diario de Meteostat no los trae, y en El Tepual son justamente los que cierran el aeropuerto. Los METAR de la DGAC si los tienen.
 
@@ -887,15 +934,13 @@ Ordenado por impacto esperado, no por facilidad:
 
 ---
 
----
-
 ## Respuesta a la retroalimentacion de la EP1
 
 Cada observacion del docente, y que se hizo con ella.
 
 | # | Observacion | Estado | Donde verlo |
 |---|---|---|---|
-| 1 | No existe notebook `.ipynb`; el README no tiene objetivos/KPIs ni CRISP-DM | **Resuelto** | [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) (47 celdas ejecutables) · [Objetivos](#problema-de-negocio-y-objetivos) · [KPIs](#kpis--como-se-mide-el-exito) · [CRISP-DM](#metodologia--crisp-dm) |
+| 1 | No existe notebook `.ipynb`; el README no tiene objetivos/KPIs ni CRISP-DM | **Resuelto** | [`notebooks/informe_ml_operaciones.ipynb`](notebooks/informe_ml_operaciones.ipynb) (53 celdas ejecutables) · [Objetivos](#problema-de-negocio-y-objetivos) · [KPIs](#kpis--como-se-mide-el-exito) · [CRISP-DM](#metodologia--crisp-dm) |
 | 2 | EDA basico: sin `describe()`, duplicados, outliers, EDA de SCTE ni del target | **Resuelto** | [Calidad de los datos](#calidad-de-los-datos--que-encontramos-al-mirar-de-cerca) y el reporte completo en [`data/08_reporting/eda_report.md`](data/08_reporting/eda_report.md) |
 | 3 | El texto contradice las figuras (correlaciones y etiquetas de cluster) | **Resuelto, y era peor de lo señalado** | Ver el detalle abajo |
 | 4 | "Alerta temprana de retrasos" no usaba datos de retrasos | **Rehecho de raiz** | [Como se construye el retraso](#como-se-construye-el-retraso-si-el-dato-no-lo-trae) |
@@ -966,11 +1011,12 @@ OperacionesAeronaves/
 │   ├── ml/              ← EDA avanzado, clustering y clasificacion
 │   └── retrasos_ml/     ← PoC de retrasos
 │       ├── nodes.py         ← target, clima y modelos supervisados
-│       └── segmentacion.py  ← aprendizaje no supervisado
+│       ├── segmentacion.py  ← aprendizaje no supervisado
+│       └── eda.py           ← reporte EDA reproducible
 │
 ├── tests/
-│   ├── test_run.py                  ← humo: los 4 pipelines se registran
-│   └── pipelines/retrasos_ml/       ← 22 tests: horario, clima y seleccion de k
+│   ├── test_run.py                  ← 7 tests de humo: los 4 pipelines se registran
+│   └── pipelines/retrasos_ml/       ← 19 tests: horario, clima y seleccion de k
 │
 ├── conf/base/
 │   ├── catalog.yml      ← registro de todos los datasets

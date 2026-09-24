@@ -33,18 +33,29 @@ retrasos_ml:
   anio_corte_test: 2025
   random_state: 42
 
-  # Gradient boosting muy podado a proposito. Con la configuracion tipica
-  # (300 iteraciones, profundidad 6) llega a AUC 0.84 en train y 0.49 en test:
-  # memoriza ruido. Estos valores salieron de comparar contra el ano de
-  # validacion, nunca contra el de test.
-  max_iter: 40
-  learning_rate: 0.03
-  max_depth: 2
-  min_samples_leaf: 500
-  l2_regularization: 5.0
+  # Grilla de busqueda. Cada configuracion se ajusta con el tramo de
+  # entrenamiento y se puntua contra el ano de validacion; el tramo de prueba
+  # no participa en ninguna decision.
+  #
+  # El orden va de mas flexible a mas regularizado a proposito: con una señal
+  # tan debil, la primera fila llega a ROC-AUC 0.84 en entrenamiento y 0.52 en
+  # validacion — memoriza ruido. Recorrer la grilla completa es lo que permite
+  # justificar con evidencia por que el modelo final esta tan podado.
+  grilla_gradient_boosting:
+    - {max_iter: 300, learning_rate: 0.06, max_depth: 6, min_samples_leaf: 20,   l2_regularization: 0.0}
+    - {max_iter: 150, learning_rate: 0.05, max_depth: 4, min_samples_leaf: 50,   l2_regularization: 1.0}
+    - {max_iter: 100, learning_rate: 0.05, max_depth: 3, min_samples_leaf: 100,  l2_regularization: 1.0}
+    - {max_iter: 60,  learning_rate: 0.05, max_depth: 2, min_samples_leaf: 200,  l2_regularization: 1.0}
+    - {max_iter: 40,  learning_rate: 0.03, max_depth: 2, min_samples_leaf: 500,  l2_regularization: 5.0}
+    - {max_iter: 25,  learning_rate: 0.05, max_depth: 2, min_samples_leaf: 1000, l2_regularization: 10.0}
 
-  # Regresion logistica regularizada: el competidor simple y calibrado.
-  logreg_C: 0.1
+  # Regresion logistica: el competidor simple y calibrado. C mas chico = mas
+  # regularizacion.
+  grilla_logistica:
+    - {C: 1.0}
+    - {C: 0.1}
+    - {C: 0.01}
+    - {C: 0.001}
 
   # --- Aprendizaje no supervisado -------------------------------------------
   # Un slot con pocas operaciones no tiene comportamiento estable que describir.

@@ -302,27 +302,21 @@ def _grilla(params: dict) -> dict[str, list[dict]]:
 
     **Por que la grilla es chica y sesgada a la regularizacion.** Con una señal
     debil, el boosting sin podar memoriza: llega a AUC 0.84 en entrenamiento y
-    0.49 en prueba. La grilla recorre desde configuraciones flexibles hasta muy
-    restringidas para que la eleccion del punto sea del dato, no nuestra.
+    0.52 en validacion. La grilla recorre desde configuraciones flexibles hasta
+    muy restringidas para que la eleccion del punto sea del dato, no nuestra.
+
+    Las configuraciones viven en `conf/base/parameters_retrasos_ml.yml`: probar
+    otra grilla no deberia exigir tocar el codigo.
     """
     semilla = params["random_state"]
     return {
         "GradientBoosting": [
-            {"max_iter": it, "learning_rate": lr, "max_depth": prof,
-             "min_samples_leaf": hojas, "l2_regularization": l2,
-             "random_state": semilla, "early_stopping": False}
-            for it, lr, prof, hojas, l2 in [
-                (300, 0.06, 6, 20, 0.0),     # flexible: el punto de partida tipico
-                (150, 0.05, 4, 50, 1.0),
-                (100, 0.05, 3, 100, 1.0),
-                (60, 0.05, 2, 200, 1.0),
-                (40, 0.03, 2, 500, 5.0),
-                (25, 0.05, 2, 1000, 10.0),   # casi un modelo aditivo
-            ]
+            {**config, "random_state": semilla, "early_stopping": False}
+            for config in params["grilla_gradient_boosting"]
         ],
         "RegresionLogistica": [
-            {"C": c, "max_iter": 1000, "random_state": semilla}
-            for c in (1.0, 0.1, 0.01, 0.001)
+            {**config, "max_iter": 1000, "random_state": semilla}
+            for config in params["grilla_logistica"]
         ],
     }
 
